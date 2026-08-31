@@ -6,9 +6,9 @@
 
 ## 架构
 
-- **大脑** `background.js`（service worker, module）：跑 OpenAI 兼容工具调用循环，直连 LM Studio `/v1/chat/completions`（`tools` + `tool_calls`，无云端）。原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；请求带 5 分钟超时（AbortController）+ `cache_prompt:true`（LM Studio KV cache，多轮循环降首 token 延迟）；MAX_TURNS=120，耗尽时明确提示。
-- **手** `content.js`：浮窗 UI（shadow DOM 隔离）+ DOM 工具执行器。每次 `get_form` 重建 `REFS`（ref→{el,item,kind}）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「住所自動入力」等异步按钮轮询表单值变化（最多 3s）。
-- **眼** `get_form` / `read_options`：把当前步骤快照、真实下拉选项喂回模型。下拉选项按字段专属浮层（`aria-owns/aria-controls`）定位，避免并行时读到其它字段的下拉；已填的 radio/cards 不再带 options 列表省 token。
+- **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；MAX_TURNS=120，耗尽时明确提示。
+- **手** `src/content/dom-tools.js`：DOM 工具执行器，含 select 互斥锁与字段专属下拉定位（aria-owns）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「住所自動入力」等异步按钮轮询表单值变化（最多 3s）。`utils.js`（通用工具）/`snapshot.js`（快照+ref）/`panel.js`（浮窗 UI）/`main.js`（消息总线）由 manifest `content_scripts.js` **按序注入共享同一隔离环境**（零构建，不能 import/export）。
+- **眼** `src/content/snapshot.js` 的 `buildSnapshot`：把当前步骤快照、真实下拉选项喂回模型。已填的 radio/cards 不再带 options 列表省 token。
 - `tools.js` 工具定义（OpenAI function 格式）；`system-prompt.js` agent 指令 + 字段/枚举/日语格式指南。
 
 ## 运行配置
@@ -48,5 +48,6 @@ elepay：`business.elepay.io`(prod) / `business.sandbox-elepay.com` / `stg-busin
 - 真机测：`chrome://extensions` 改完**点「重新加载」**，刷新表单页，看浮窗实时日志（`▶`工具调用 / `↳`结果）。
 - 端到端连通可在本机 `node` 里 `fetch` LM Studio `/v1/chat/completions` 带 `tools` 验证返回 `tool_calls`。
 - 下个最可能要调的点：复杂联动控件、日期 picker 若 readonly 需改「点面板日期格」、「住所自動入力」若 click 没触发异步查询需换触发方式。
-- **不要**引入 agent-sdk/打包构建（MV3 不能运行时 require，上 SDK 要 bundler，破坏即装即用；工具循环本身才几十行）。
+- **不要**引入 agent-sdk/打包构建（MV3 不能运行时 require，上 SDK 要 bundler，破坏即装即用；background 已按 ES module 拆分 `src/background/`，content 侧靠 manifest 多文件按序注入共享作用域，均零构建；工具循环本身才几十行）。
 - 字段/枚举/日语格式权威来源：elepay-business `ApplyForm/steps/*` 与姊妹工具 `../elepay-apply-autofill-ext/schema.js`。
+- 图标：`icons/make_icons.py` 程序化生成（蓝渐变+表单+勾+AI 徽标），改设计改脚本重跑即可，无需素材文件。

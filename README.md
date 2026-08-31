@@ -57,11 +57,19 @@
 ## 文件结构
 
 ```
-manifest.json      MV3 配置（含 LM Studio 主机 + 表单域名）
-background.js      service worker：OpenAI 兼容工具调用循环 + 调 LM Studio
-content.js         浮窗 UI（shadow DOM）+ DOM 工具执行器
-tools.js           工具定义（OpenAI function 格式）
-system-prompt.js   agent 指令 + 字段/枚举/日语格式指南
+manifest.json          MV3 配置（推理服务主机 + 表单域名）
+src/background/       service worker（ES module）
+  index.js            入口：工具调用循环 + 消息路由（同一批 tool_calls 并行下发）
+  llm.js              推理服务客户端（设置/超时/cache_prompt/auto 模型解析）
+  tools.js            工具定义（OpenAI function 格式）
+  system-prompt.js    agent 指令 + 字段/枚举/日语格式指南
+src/content/          页面侧脚本（manifest 按序注入，共享同一隔离环境，零构建）
+  utils.js            通用工具（waitFor 自适应等待 / JWT 邮箱探测）
+  snapshot.js         「眼」：get_form 快照 + ref 管理
+  dom-tools.js        「手」：DOM 工具执行器（含 select 互斥锁）
+  panel.js            浮窗 UI（shadow DOM 隔离）
+  main.js             消息总线 + 入口
+icons/                插件图标（make_icons.py 程序化生成，改色/改版重跑即可）
 ```
 
 ## 后续可扩展

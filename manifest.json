@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
   "name": "加盟店申请表单 AI Agent 自动填充",
-  "version": "0.1.0",
-  "description": "浏览器内 agent（本地 LM Studio 驱动）：识别并逐步填写 elepay-business 加盟店申请表单，读真实下拉选项、自我纠错、走到确认页停下（页面右下角浮窗控制）。仅供测试。",
+  "version": "0.2.0",
+  "description": "浏览器内 agent（本地推理服务驱动）：识别并逐步填写 elepay-business 加盟店申请表单，读真实下拉选项、自我纠错、走到确认页停下（页面右下角浮窗控制）。仅供测试。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["storage"],
   "host_permissions": [
     "http://10.0.0.64:8434/*",
@@ -17,11 +23,17 @@
     "http://localhost:7082/*"
   ],
   "background": {
-    "service_worker": "background.js",
+    "service_worker": "src/background/index.js",
     "type": "module"
   },
   "action": {
-    "default_title": "加盟店申请 AI Agent（点击切换页面浮窗）"
+    "default_title": "加盟店申请 AI Agent（点击切换页面浮窗）",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "content_scripts": [
     {
@@ -32,7 +44,13 @@
         "https://*.sterasmartone.com/*",
         "http://localhost:7082/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "src/content/utils.js",
+        "src/content/snapshot.js",
+        "src/content/dom-tools.js",
+        "src/content/panel.js",
+        "src/content/main.js"
+      ],
       "run_at": "document_idle"
     }
   ]
