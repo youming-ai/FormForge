@@ -567,9 +567,9 @@ function createPanel () {
         <details id="settings">
           <summary>设置（LM Studio）</summary>
           <label class="fl" for="endpoint">接口地址</label>
-          <input id="endpoint" type="text" placeholder="http://10.0.0.64:8434/v1/chat/completions" />
+          <input id="endpoint" type="text" placeholder="http://10.0.0.64:8800/v1/chat/completions" />
           <label class="fl" for="model">模型名（auto = 自动选已加载模型；需支持 function calling）</label>
-          <input id="model" type="text" placeholder="qwen/qwen3-30b-a3b-2507" />
+          <input id="model" type="text" placeholder="Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M" />
           <label class="fl" for="baseemail">基础邮箱（留空自动探测当前登录用户；邮箱字段会用其加号别名，tag 由 agent 按上下文起）</label>
           <input id="baseemail" type="text" placeholder="自动探测，可手填，如 you@elestyle.jp" />
           <label class="fl" for="uploadimg">固定上传图片（可选，默认用自动生成的测试图）</label>

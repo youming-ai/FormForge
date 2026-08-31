@@ -7,10 +7,10 @@ const MAX_TURNS = 120
 const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加载大模型可能很慢，给足）
 
 const DEFAULT_SETTINGS = {
-  // 本地/局域网 LM Studio（OpenAI 兼容）。Tailscale 时可改 100.96.69.27:8434，本机用 localhost:1234
-  endpoint: 'http://10.0.0.64:8434/v1/chat/completions',
-  // 'auto' = 调 /v1/models 自动选已加载模型；或写死如 qwen/qwen3-30b-a3b-2507（需支持 function calling）
-  model: 'qwen/qwen3-30b-a3b-2507',
+  // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
+  endpoint: 'http://10.0.0.64:8800/v1/chat/completions',
+  // 需支持 function calling；llama-swap 会按需 JIT 换入未加载的模型（首次有冷加载延迟）
+  model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }

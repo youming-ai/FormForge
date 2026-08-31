@@ -6,6 +6,7 @@
   "permissions": ["storage"],
   "host_permissions": [
     "http://10.0.0.64:8434/*",
+    "http://10.0.0.64:8800/*",
     "http://100.96.69.27:8434/*",
     "http://localhost:1234/*",
     "http://127.0.0.1:1234/*",
