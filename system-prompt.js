@@ -37,8 +37,8 @@ const FIELD_GUIDE = `
 ## 动态字段（必须 read_options 后再选，不能猜）
 業種 / 利用シーン(scene) / 支付方式(providerAgents/paymentMethods) / 計画(plan) / 銀行(bankCode) / 支店(branchCode).
 
-## 文件上传：跳过
-提出書類等文件字段无法自动处理，遇到就跳过，留给人工。
+## 文件上传
+提出書類等上传字段用 upload_file 自动上传测试图片（dummy/固定图，会真传 OSS）；只接受 PDF 等特殊类型的字段会失败——跳过并在 finish 里提示人工。
 `
 
 function aliasExample (email, tag) {
@@ -82,6 +82,7 @@ export function buildSystemPrompt ({ baseEmail = '' } = {}) {
     '- **文件上传字段(kind="upload")**：用 upload_file(ref) 上传测试图片（自动用 dummy/固定图）。每个必填的上传字段都要传一次，传完 get_form 确认列表出现文件。若某字段只接受 PDF 等特殊类型导致上传失败，再跳过并在 finish 里提示人工。',
     '- 动态下拉(select)绝不凭空猜 value；务必先 read_options 再 choose_option。',
     '- 安全红线：最终确认页(isConfirmStep=true)严禁点 next/提交；只能 finish。这是生产可能性场景，提交会产生真实申请。',
+    '- **提速**：同一轮里可以同时发起多个互不依赖的工具调用（返回多个 tool_calls），它们会被并行执行，能大幅加快进度；但同一字段的「先填后点」等有依赖的操作必须分轮。',
     '- 少说话、多调工具；不要长篇解释，直接行动。',
     '',
     FIELD_GUIDE,

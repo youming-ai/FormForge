@@ -6,16 +6,16 @@
 
 ## 架构
 
-- **大脑** `background.js`（service worker, module）：跑 OpenAI 兼容工具调用循环，直连 LM Studio `/v1/chat/completions`（`tools` + `tool_calls`，无云端）。原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。
-- **手** `content.js`：浮窗 UI（shadow DOM 隔离）+ DOM 工具执行器。每次 `get_form` 重建 `REFS`（ref→{el,item,kind}）。
-- **眼** `get_form` / `read_options`：把当前步骤快照、真实下拉选项喂回模型。
+- **大脑** `background.js`（service worker, module）：跑 OpenAI 兼容工具调用循环，直连 LM Studio `/v1/chat/completions`（`tools` + `tool_calls`，无云端）。原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；请求带 5 分钟超时（AbortController）+ `cache_prompt:true`（LM Studio KV cache，多轮循环降首 token 延迟）；MAX_TURNS=120，耗尽时明确提示。
+- **手** `content.js`：浮窗 UI（shadow DOM 隔离）+ DOM 工具执行器。每次 `get_form` 重建 `REFS`（ref→{el,item,kind}）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「住所自動入力」等异步按钮轮询表单值变化（最多 3s）。
+- **眼** `get_form` / `read_options`：把当前步骤快照、真实下拉选项喂回模型。下拉选项按字段专属浮层（`aria-owns/aria-controls`）定位，避免并行时读到其它字段的下拉；已填的 radio/cards 不再带 options 列表省 token。
 - `tools.js` 工具定义（OpenAI function 格式）；`system-prompt.js` agent 指令 + 字段/枚举/日语格式指南。
 
 ## 运行配置
 
 - 默认 endpoint `http://10.0.0.64:8434/v1/chat/completions`（macstudio LAN；Tailscale 用 `100.96.69.27:8434`，本机 `localhost:1234`）。
 - 默认模型 `qwen/qwen3-30b-a3b-2507`（**必须支持 function calling**，已验证）；填 `auto` 则调 `/v1/models` 自动选已加载模型。
-- 设置存 `chrome.storage.local.agentSettings = {endpoint, model, uploadImage}`，面板可改。
+- 设置存 `chrome.storage.local.agentSettings = {endpoint, model, baseEmail, uploadImage}`，面板可改（基础邮箱可清空恢复自动探测，固定图片可移除）。
 - 改 manifest `host_permissions` / `content_scripts.matches` 切环境（已含四个表单域名）。
 
 ## 目标表单的 DOM 现实（踩坑知识，改 content.js 前必读）

@@ -1,8 +1,10 @@
 // background.js —— service worker：跑 OpenAI 兼容(LM Studio)的工具调用循环，驱动 content 执行 DOM 操作
+// 同一轮的多个 tool_calls 并行下发执行（互不依赖的 DOM 操作同时进行，select 在 content 侧自动排队）
 import { TOOLS } from './tools.js'
 import { buildSystemPrompt } from './system-prompt.js'
 
-const MAX_TURNS = 80
+const MAX_TURNS = 120
+const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加载大模型可能很慢，给足）
 
 const DEFAULT_SETTINGS = {
   // 本地/局域网 LM Studio（OpenAI 兼容）。Tailscale 时可改 100.96.69.27:8434，本机用 localhost:1234
@@ -25,6 +27,10 @@ function log (tabId, kind, text, extra) {
   chrome.tabs.sendMessage(tabId, { type: 'agent:log', kind, text, extra }).catch(() => {})
 }
 
+function parseArgs (tc) {
+  try { return JSON.parse(tc.function?.arguments || '{}') } catch (_) { return {} }
+}
+
 /** model='auto' → 调 /v1/models 取第一个非 embedding 模型 */
 async function resolveModel (settings) {
   const m = (settings.model || '').trim()
@@ -42,6 +48,9 @@ async function resolveModel (settings) {
 }
 
 async function callLLM ({ endpoint, model, messages }) {
+  const ctrl = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort() }, LLM_TIMEOUT_MS)
   let resp
   try {
     resp = await fetch(endpoint, {
@@ -55,10 +64,15 @@ async function callLLM ({ endpoint, model, messages }) {
         temperature: 0.3,
         max_tokens: 2000,
         stream: false,
+        cache_prompt: true, // LM Studio：保留 KV prompt cache，多轮工具循环显著降低首 token 延迟
       }),
+      signal: ctrl.signal,
     })
   } catch (err) {
+    if (timedOut) throw new Error(`LM Studio 响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：可能正在冷加载模型或队列拥堵，请重试`)
     throw new Error(`连不上 LM Studio (${endpoint})：${err?.message || err}。确认已启动并开启「Serve on Local Network」。`)
+  } finally {
+    clearTimeout(timer)
   }
   if (!resp.ok) {
     const t = await resp.text().catch(() => '')
@@ -74,6 +88,12 @@ function toResultString (res) {
   if (res == null) return '(no result)'
   if (typeof res === 'string') return res
   try { return JSON.stringify(res) } catch (_) { return String(res) }
+}
+
+function briefInput (input) {
+  if (!input) return ''
+  const s = JSON.stringify(input)
+  return s.length > 120 ? s.slice(0, 117) + '…' : s
 }
 
 async function runAgent (tabId, scenario, baseEmail) {
@@ -94,8 +114,9 @@ async function runAgent (tabId, scenario, baseEmail) {
   log(tabId, 'status', `开始（模型 ${model}）`)
 
   try {
+    let ended = null
     for (let turn = 0; turn < MAX_TURNS; turn++) {
-      if (aborted.has(tabId)) { log(tabId, 'status', '已被用户停止'); break }
+      if (aborted.has(tabId)) { log(tabId, 'status', '已被用户停止'); ended = 'abort'; break }
 
       const choice = await callLLM({ ...settings, model, messages })
       const m = choice.message || {}
@@ -104,34 +125,34 @@ async function runAgent (tabId, scenario, baseEmail) {
       if (m.content && String(m.content).trim()) log(tabId, 'assistant', String(m.content).trim())
 
       const toolCalls = m.tool_calls || []
-      if (!toolCalls.length) { log(tabId, 'done', '模型结束（无更多工具调用）'); break }
+      if (!toolCalls.length) { log(tabId, 'done', '模型结束（无更多工具调用）'); ended = 'end'; break }
 
-      let finished = false
-      for (const tc of toolCalls) {
-        if (aborted.has(tabId)) { finished = true; break }
-        const name = tc.function?.name
-        let args = {}
-        try { args = JSON.parse(tc.function?.arguments || '{}') } catch (_) { /* 容错 */ }
-
-        if (name === 'finish') {
-          log(tabId, 'done', `✅ 完成：${args.summary || '(无说明)'}`)
-          finished = true
-          break
-        }
-
-        log(tabId, 'tool', `${name} ${briefInput(args)}`)
-        let res
-        try {
-          res = await chrome.tabs.sendMessage(tabId, { type: 'agent:exec', name, input: args })
-        } catch (err) {
-          res = { ok: false, result: `与页面通信失败：${err?.message || err}` }
-        }
-        const ok = res?.ok !== false
-        log(tabId, 'result', toResultString(res?.result), { ok })
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: toResultString(res?.result) })
+      const finishTc = toolCalls.find(tc => tc.function?.name === 'finish')
+      if (finishTc) {
+        log(tabId, 'done', `✅ 完成：${parseArgs(finishTc).summary || '(无说明)'}`)
+        ended = 'finish'
+        break
       }
 
-      if (finished) break
+      // 先按序打日志，再并行执行同一批工具调用：总耗时从「求和」变为「取最大」
+      for (const tc of toolCalls) log(tabId, 'tool', `${tc.function?.name} ${briefInput(parseArgs(tc))}`)
+
+      const results = await Promise.all(toolCalls.map(async tc => {
+        try {
+          return await chrome.tabs.sendMessage(tabId, { type: 'agent:exec', name: tc.function?.name, input: parseArgs(tc) })
+        } catch (err) {
+          return { ok: false, result: `与页面通信失败：${err?.message || err}` }
+        }
+      }))
+
+      for (let i = 0; i < toolCalls.length; i++) {
+        const res = results[i]
+        log(tabId, 'result', toResultString(res?.result), { ok: res?.ok !== false })
+        messages.push({ role: 'tool', tool_call_id: toolCalls[i].id, content: toResultString(res?.result) })
+      }
+    }
+    if (!ended && !aborted.has(tabId)) {
+      log(tabId, 'error', `已达最大轮数 ${MAX_TURNS}，自动停止；页面进度已保留，可重新「开始填写」继续（agent 会跳过已填字段）`)
     }
   } catch (err) {
     log(tabId, 'error', String(err?.message || err))
@@ -139,12 +160,6 @@ async function runAgent (tabId, scenario, baseEmail) {
     running.delete(tabId)
     chrome.tabs.sendMessage(tabId, { type: 'agent:ended' }).catch(() => {})
   }
-}
-
-function briefInput (input) {
-  if (!input) return ''
-  const s = JSON.stringify(input)
-  return s.length > 120 ? s.slice(0, 117) + '…' : s
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

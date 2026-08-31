@@ -5,6 +5,16 @@
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 const pad2 = n => String(n).padStart(2, '0')
 
+// 轮询等待条件成立（早退），替代固定 sleep：快则几十 ms 返回，慢则到 timeout 为止
+async function waitFor (cond, { timeout = 1500, step = 50 } = {}) {
+  const t0 = Date.now()
+  while (Date.now() - t0 < timeout) {
+    if (cond()) return true
+    await sleep(step)
+  }
+  return cond()
+}
+
 function setNativeValue (el, value) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
@@ -111,7 +121,7 @@ function buildSnapshot () {
     f.filled = !!String(f.value || '').trim()
     const err = errorOf(item)
     if (err) f.error = err
-    if (kind === 'radio') f.options = [...item.querySelectorAll('.ant-radio-wrapper')].map(w => w.textContent.trim())
+    if (kind === 'radio' && !f.filled) f.options = [...item.querySelectorAll('.ant-radio-wrapper')].map(w => w.textContent.trim())
     if (kind === 'checkbox') {
       f.options = [...item.querySelectorAll('.ant-checkbox-wrapper')]
         .map(w => ({ label: w.textContent.trim(), checked: !!w.querySelector('.ant-checkbox-checked') }))
@@ -133,7 +143,7 @@ function buildSnapshot () {
       ref, kind: 'cards', label: '料金プラン/方案卡片',
       value: active ? titleOf(active) : '',
       filled: !!active,
-      options: cards.map(titleOf),
+      ...(active ? {} : { options: cards.map(titleOf) }), // 已选中的卡片不必再给选项列表，省 token
       required: true,
     })
   })
@@ -181,30 +191,68 @@ function buildSnapshot () {
 const getRef = ref => REFS.find(r => r.ref === ref)
 
 // ===================== DOM 工具执行器 =====================
-function dropdownOptions () {
+// 注：同一轮的多个工具调用会被 background 并行执行，select 类操作用互斥锁排队，避免多个下拉互相开合干扰
+const optText = o => (o.getAttribute('title') || o.textContent || '').trim()
+
+// 定位该字段专属的下拉浮层（aria-owns / aria-controls），避免读到其它字段的下拉；取不到则退回全局
+function dropdownEl (item) {
+  const sel = item.querySelector('.ant-select')
+  const inp = item.querySelector('.ant-select-selection-search input, .ant-select input')
+  const id = (sel && (sel.getAttribute('aria-owns') || sel.getAttribute('aria-controls'))) ||
+    (inp && (inp.getAttribute('aria-controls') || inp.getAttribute('aria-owns')))
+  return id ? document.getElementById(id) : null
+}
+function optionsOf (item) {
+  const dd = dropdownEl(item)
+  if (dd) return dd.classList.contains('ant-select-dropdown-hidden') ? [] : [...dd.querySelectorAll('.ant-select-item-option')]
   return [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')]
 }
-const optText = o => (o.getAttribute('title') || o.textContent || '').trim()
+
+// select 操作互斥：并行批量执行工具时防止多个下拉互相开合/串台
+let selectQueue = Promise.resolve()
+function withSelectLock (fn) {
+  const p = selectQueue.then(fn)
+  selectQueue = p.then(() => {}, () => {})
+  return p
+}
 
 async function openSelect (item) {
   const selector = item.querySelector('.ant-select-selector') || item.querySelector('.ant-select')
   selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   selector?.click()
-  await sleep(400)
+  // 等下拉浮层出现且渲染出选项（动态接口选项可能异步到达），出现即早退
+  await waitFor(() => {
+    const dd = dropdownEl(item)
+    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && !!dd.querySelector('.ant-select-item-option, .ant-empty')
+    return !!document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+  }, { timeout: 1000, step: 50 })
 }
-function closeSelect (item) {
+async function closeSelect (item) {
   const input = item.querySelector('input')
   input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  document.body.click()
+  const dd = dropdownEl(item)
+  if (dd) {
+    if (!dd.classList.contains('ant-select-dropdown-hidden')) {
+      await sleep(80)
+      if (!dd.classList.contains('ant-select-dropdown-hidden')) document.body.click() // Escape 没关掉才用全局点击，避免误关其它浮层
+    }
+  } else {
+    await sleep(60)
+    document.body.click()
+  }
 }
 
 async function fillText (ref, value) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  // 防误用：上传/日期/单选/复选/卡片不适用 fill_text（select 保留：搜索型下拉需要键入过滤）
+  if (['upload', 'date', 'radio', 'checkbox', 'cards'].includes(r.kind)) {
+    return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、radio/checkbox/cards→choose_option` }
+  }
   const input = r.item.querySelector('textarea, input')
   if (!input) return { ok: false, result: '该字段不是文本框' }
   setNativeValue(input, value)
-  await sleep(80)
+  await sleep(30)
   return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
 }
 
@@ -213,17 +261,19 @@ async function chooseOption (ref, option) {
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
 
   if (r.kind === 'select') {
-    await openSelect(r.item)
-    const opts = dropdownOptions()
-    let target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
-    if (!target) {
-      const list = opts.slice(0, 20).map(optText).join(' / ')
-      closeSelect(r.item)
-      return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级)'}` }
-    }
-    target.click()
-    await sleep(250)
-    return { ok: true, result: `已选「${labelOf(r.item)}」= ${optText(target)}` }
+    return withSelectLock(async () => {
+      await openSelect(r.item)
+      const opts = optionsOf(r.item)
+      let target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
+      if (!target) {
+        const list = opts.slice(0, 20).map(optText).join(' / ')
+        await closeSelect(r.item)
+        return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级)'}` }
+      }
+      target.click()
+      await waitFor(() => !!r.item.querySelector('.ant-select-selection-item'), { timeout: 500, step: 50 })
+      return { ok: true, result: `已选「${labelOf(r.item)}」= ${optText(target)}` }
+    })
   }
 
   if (r.kind === 'radio') {
@@ -231,7 +281,7 @@ async function chooseOption (ref, option) {
     const w = wraps.find(x => x.textContent.trim() === option) || wraps.find(x => x.textContent.trim().includes(option))
     if (!w) return { ok: false, result: `未找到单选项「${option}」，可选：${wraps.map(x => x.textContent.trim()).join(' / ')}` }
     w.click()
-    await sleep(120)
+    await waitFor(() => !!w.querySelector('.ant-radio-checked') || w.classList.contains('ant-radio-wrapper-checked'), { timeout: 400, step: 40 })
     return { ok: true, result: `已选「${labelOf(r.item)}」= ${w.textContent.trim()}` }
   }
 
@@ -245,14 +295,15 @@ async function chooseOption (ref, option) {
         const checked = !!w.querySelector('.ant-checkbox-checked')
         if (checked !== want) { (w.querySelector('input.ant-checkbox-input') || w).click(); n++ }
       })
-      await sleep(200) // 等 Vue 更新，避免下一次 get_form 读到旧状态导致反复勾选
+      // 等 Vue 更新到目标状态（早退），避免下一次 get_form 读到旧状态导致反复勾选
+      await waitFor(() => wraps.every(w => !!w.querySelector('.ant-checkbox-checked') === want), { timeout: 600, step: 40 })
       if (n === 0) return { ok: true, result: `复选框已是目标状态（无需改动，当前勾选 ${checkedNow()}/${wraps.length}），请前进到下一项` }
       return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框（当前勾选 ${checkedNow()}/${wraps.length}）` }
     }
     const w = wraps.find(x => x.textContent.trim().includes(option))
     if (!w) return { ok: false, result: `未找到复选项「${option}」` }
     if (!w.querySelector('.ant-checkbox-checked')) (w.querySelector('input.ant-checkbox-input') || w).click()
-    await sleep(200)
+    await waitFor(() => !!w.querySelector('.ant-checkbox-checked'), { timeout: 400, step: 40 })
     return { ok: true, result: `「${option}」当前${w.querySelector('.ant-checkbox-checked') ? '已勾选' : '未勾选'}` }
   }
 
@@ -262,7 +313,7 @@ async function chooseOption (ref, option) {
     const card = cards.find(c => titleOf(c) === option) || cards.find(c => titleOf(c).includes(option))
     if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(titleOf).join(' / ')}` }
     card.click()
-    await sleep(250)
+    await waitFor(() => card.classList.contains('active'), { timeout: 500, step: 50 })
     return { ok: true, result: `已选卡片「${titleOf(card)}」` }
   }
 
@@ -308,6 +359,7 @@ async function uploadFile (ref) {
   if (!input) return { ok: false, result: '该字段不是上传组件（找不到 file input）' }
   let file
   try { file = await makeUploadFile() } catch (e) { return { ok: false, result: '生成上传文件失败：' + (e?.message || e) } }
+  const n0 = r.item.querySelectorAll('.ant-upload-list-item').length
   try {
     const dt = new DataTransfer()
     dt.items.add(file)
@@ -316,10 +368,15 @@ async function uploadFile (ref) {
     return { ok: false, result: '无法写入 file input：' + (e?.message || e) }
   }
   input.dispatchEvent(new Event('change', { bubbles: true }))
-  await sleep(1500) // 等 rc-upload 走 customRequest 传到 OSS
+  // 等上传项出现且上传结束（上传中带 .ant-upload-list-item-uploading）：快则早退，慢则最多 12s
+  await waitFor(() => {
+    const items = [...r.item.querySelectorAll('.ant-upload-list-item')]
+    return items.length > n0 && items.every(it => !it.classList.contains('ant-upload-list-item-uploading'))
+  }, { timeout: 12000, step: 120 })
   const n = r.item.querySelectorAll('.ant-upload-list-item').length
   const err = r.item.querySelector('.ant-upload-list-item-error')
   if (err) return { ok: false, result: `上传可能失败（列表项标红）。该字段或只接受特定类型(如 PDF)，需人工。` }
+  if (n <= n0) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝），需人工处理。' }
   return { ok: true, result: `已上传「${file.name}」，当前列表 ${n} 个文件；稍后可 get_form 复核。` }
 }
 
@@ -327,9 +384,23 @@ async function uploadFile (ref) {
 async function clickElement (ref) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止点击页面元素（防误提交），请调用 finish 结束。' }
   const el = r.item.matches('button') ? r.item : (r.item.querySelector('button') || r.item)
+  const label = (r.item.textContent || '').trim()
+  // 「住所自動入力」等按钮会异步查邮编带出地址：轮询等表单值变化，有变化立即返回
+  if (/住所|自動入力|検索|search/i.test(label)) {
+    const scope = scopeEl()
+    const before = [...scope.querySelectorAll('input')].map(i => i.value)
+    el.click()
+    const changed = await waitFor(() => {
+      const now = [...scope.querySelectorAll('input')].map(i => i.value)
+      return now.length !== before.length || now.some((v, i) => v !== before[i])
+    }, { timeout: 3000, step: 100 })
+    await sleep(150)
+    return { ok: true, result: `已点击「${label || ref}」${changed ? '，已检测到表单值带出' : '（3 秒内未检测到值变化）'}；请 get_form 复核地址汉字+カナ` }
+  }
   el.click()
-  await sleep(1300) // 住所自動入力等需异步查邮编→带出地址，多等一会
+  await sleep(250)
   return { ok: true, result: `已点击 ${ref}（如为「住所自動入力」，请 get_form 复核地址是否带出汉字+カナ）` }
 }
 
@@ -343,10 +414,12 @@ async function readOptions (ref) {
     return { ok: true, result: { options: [...r.item.querySelectorAll('.ant-checkbox-wrapper')].map(w => w.textContent.trim()) } }
   }
   if (r.kind !== 'select') return { ok: false, result: `字段类型 ${r.kind} 没有可读选项` }
-  await openSelect(r.item)
-  const opts = dropdownOptions().map(optText).filter(Boolean)
-  closeSelect(r.item)
-  return { ok: true, result: { count: opts.length, options: opts.slice(0, 60) } }
+  return withSelectLock(async () => {
+    await openSelect(r.item)
+    const opts = optionsOf(r.item).map(optText).filter(Boolean)
+    await closeSelect(r.item)
+    return { ok: true, result: { count: opts.length, options: opts.slice(0, 60) } }
+  })
 }
 
 // 仅设值并触发 input（不连带 change/blur，避免过早关闭面板）
@@ -370,14 +443,14 @@ async function setDate (ref, y, m, d) {
     input.focus()
     input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
     input.click()
-    await sleep(250) // 打开面板
+    await waitFor(() => !!document.querySelector('.ant-picker-dropdown:not(.ant-picker-dropdown-hidden)'), { timeout: 500, step: 40 })
     setInputValue(input, v) // 键入完整日期，面板据此定位
-    await sleep(220)
+    await sleep(120)
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }))
-    await sleep(200)
+    await sleep(100)
     input.blur()
     document.body.click() // 关闭面板
-    await sleep(250)
+    await sleep(120)
     const got = (r.item.querySelector('.ant-picker-input input')?.value || '').trim()
     if (got && norm(got) === want) return { ok: true, result: `已设日期「${labelOf(r.item)}」= ${got}` }
   }
@@ -390,20 +463,35 @@ async function clickButton (target) {
   const action = document.querySelector('.merchant-apply-info__action')
   if (!action) return { ok: false, result: '未找到操作按钮区' }
   if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止提交/前进，请调用 finish 结束。' }
+
+  // 轮询等步骤切换（标题/确认页状态变化），有变化早退，比固定 sleep 快
+  const before = {
+    title: (document.querySelector('.merchant-apply-info__title')?.textContent || '').trim(),
+    confirm: isConfirm(),
+  }
+  const waitStepChange = () => waitFor(() => {
+    const title = (document.querySelector('.merchant-apply-info__title')?.textContent || '').trim()
+    return title !== before.title || isConfirm() !== before.confirm
+  }, { timeout: 1500, step: 80 })
+
   if (target === 'back') {
     const b = action.querySelector('button.ant-btn-default')
-    if (b) { b.click(); await sleep(700) }
-    return { ok: true, result: '已返回上一步' }
+    if (!b || b.disabled) return { ok: false, result: '未找到可用的「返回」按钮（可能已在第一步）' }
+    b.click()
+    await waitStepChange()
+    await sleep(150)
+    return { ok: true, result: '已返回上一步（请 get_form 查看）' }
   }
   // next
   const b = action.querySelector('button.ant-btn-primary')
   if (!b) return { ok: false, result: '未找到「下一步」按钮' }
   if (b.disabled) return { ok: false, result: '「下一步」按钮被禁用：可能有未填必填项或未勾选的项。' }
   b.click()
-  await sleep(1000)
+  const changed = await waitStepChange()
+  await sleep(200) // 等新步骤渲染
   const err = document.querySelector('.ant-form-item-explain-error')
   if (err) return { ok: true, result: `已点下一步，但出现校验错误：${err.textContent.trim()}（请 get_form 复核并修正）` }
-  return { ok: true, result: '已进入下一步（请 get_form 查看新步骤）' }
+  return { ok: true, result: changed ? '已进入下一步（请 get_form 查看新步骤）' : '已点下一步（未检测到步骤变化，可能校验未过，请 get_form 复核）' }
 }
 
 async function execTool (name, input) {
@@ -487,6 +575,7 @@ function createPanel () {
           <label class="fl" for="uploadimg">固定上传图片（可选，默认用自动生成的测试图）</label>
           <input id="uploadimg" type="file" accept="image/*" />
           <div id="uploadimgname" style="font-size:11px;color:#86909c;margin-top:4px;"></div>
+          <button class="gho" id="rmimg" hidden style="margin-top:4px;padding:3px 8px;font-size:11px;">移除固定图片</button>
           <div class="row"><button class="gho" id="savecfg">保存</button></div>
         </details>
         <div class="log" id="log"></div>
@@ -508,6 +597,7 @@ function createPanel () {
     baseemail: $('baseemail'),
     uploadimg: $('uploadimg'),
     uploadimgname: $('uploadimgname'),
+    rmimg: $('rmimg'),
     prodwarn: $('prodwarn'),
   }
 
@@ -516,6 +606,7 @@ function createPanel () {
   ui.stop.addEventListener('click', () => chrome.runtime.sendMessage({ type: 'agent:stop' }))
   $('savecfg').addEventListener('click', saveCfg)
   ui.uploadimg.addEventListener('change', onPickImage)
+  ui.rmimg.addEventListener('click', onRemoveImage)
 
   ui.prodwarn.hidden = !/^business\.(elepay\.io|sterasmartone\.com)$/.test(location.hostname)
 
@@ -527,7 +618,10 @@ function createPanel () {
     // 基础邮箱：设置 > 页面探测；都没有就留空提示
     if (s.baseEmail) ui.baseemail.value = s.baseEmail
     else { const d = detectUserEmail(); if (d) { ui.baseemail.value = d; ui.baseemail.placeholder = `已探测：${d}` } }
-    if (s.uploadImage?.name) ui.uploadimgname.textContent = `当前固定图片：${s.uploadImage.name}`
+    if (s.uploadImage?.name) {
+      ui.uploadimgname.textContent = `当前固定图片：${s.uploadImage.name}`
+      ui.rmimg.hidden = false
+    }
     if (!agentSettings) $('settings').open = true
   })
 }
@@ -541,10 +635,10 @@ function saveCfg () {
   const patch = {}
   const ep = ui.endpoint.value.trim()
   const md = ui.model.value.trim()
-  const be = ui.baseemail.value.trim()
   if (ep) patch.endpoint = ep
   if (md) patch.model = md
-  if (be) patch.baseEmail = be
+  // 基础邮箱总是写入（清空 = 恢复自动探测）
+  patch.baseEmail = ui.baseemail.value.trim()
   mergeSettings(patch).then(() => setStatus('设置已保存'))
 }
 
@@ -558,6 +652,11 @@ function onPickImage () {
       .then(() => { ui.uploadimgname.textContent = `当前固定图片：${file.name}`; setStatus('固定上传图片已保存') })
   }
   reader.readAsDataURL(file)
+}
+
+function onRemoveImage () {
+  mergeSettings({ uploadImage: null })
+    .then(() => { ui.uploadimgname.textContent = ''; ui.rmimg.hidden = true; setStatus('已恢复使用自动生成的测试图') })
 }
 
 function onStart () {

@@ -3,7 +3,7 @@
   "name": "加盟店申请表单 AI Agent 自动填充",
   "version": "0.1.0",
   "description": "浏览器内 agent（本地 LM Studio 驱动）：识别并逐步填写 elepay-business 加盟店申请表单，读真实下拉选项、自我纠错、走到确认页停下（页面右下角浮窗控制）。仅供测试。",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["storage"],
   "host_permissions": [
     "http://10.0.0.64:8434/*",
     "http://100.96.69.27:8434/*",
