@@ -40,7 +40,7 @@
 2. `chrome://extensions/` → 开发者模式 → 加载已解压扩展 → 选本目录。
 3. 打开加盟店申请**新建**表单页 → 右下角出现浮窗 → 展开「设置」确认接口地址/模型 → 保存。
    - 默认接口 `http://10.0.0.64:8800/v1/chat/completions`（macstudio llama.cpp/llama-swap）；LM Studio Tailscale 用 `http://100.96.69.27:8434/...`；本机用 `http://localhost:1234/...`。
-   - 模型默认 `unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M`，填 `auto` 则调 `/v1/models` 自动选已加载模型（llama-swap 未加载的模型会按需 JIT 换入，首次有冷加载延迟）。
+   - 模型默认 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`，填 `auto` 则调 `/v1/models` 自动选已加载模型（llama-swap 未加载的模型会按需 JIT 换入，首次有冷加载延迟）。
 4. 填场景（可留空）→「开始填写」→ 看浮窗里 agent 的实时动作日志。
 
 > 点扩展图标可切换浮窗显示/隐藏。

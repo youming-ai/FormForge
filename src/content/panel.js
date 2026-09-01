@@ -113,7 +113,7 @@ function createPanel () {
             <label class="fl" for="endpoint">推理服务地址<span class="hint">OpenAI 兼容的 /v1/chat/completions</span></label>
             <input id="endpoint" type="text" spellcheck="false" placeholder="http://10.0.0.64:8800/v1/chat/completions" />
             <label class="fl" for="model">模型<span class="hint">填写 auto 可优先选择当前已加载模型</span></label>
-            <input id="model" type="text" spellcheck="false" placeholder="unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M" />
+            <input id="model" type="text" spellcheck="false" placeholder="Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M" />
             <label class="fl" for="baseemail">基础邮箱<span class="hint">留空自动探测；表单会使用安全的加号别名</span></label>
             <input id="baseemail" type="text" inputmode="email" placeholder="自动探测或手动填写" />
             <label class="fl" for="uploadimg">固定测试图片<span class="hint">可选，最大 4MB；默认使用自动生成的测试图</span></label>
@@ -170,8 +170,8 @@ function createPanel () {
   chrome.storage.local.get('agentSettings').then(({ agentSettings }) => {
     const s = agentSettings || {}
     if (s.endpoint) ui.endpoint.value = s.endpoint
-    if (['Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M', 'unsloth/Qwen3.8-27B-GGUF:8-27B-Q4_K_M'].includes(s.model)) {
-      ui.model.value = 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M'
+    if (s.model === 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M') {
+      ui.model.value = 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M'
       mergeSettings({ model: ui.model.value })
     } else if (s.model) ui.model.value = s.model
     // 基础邮箱：设置 > 页面探测；都没有就留空提示
