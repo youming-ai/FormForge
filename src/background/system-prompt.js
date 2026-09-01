@@ -27,7 +27,7 @@ const FIELD_GUIDE = `
 
 ## 典型字段与值（個人事業主・餐饮・实店铺 示例风格）
 - 会社名/個人事業主名・屋号：日语商号，如「山田太郎商店」「たろう食堂」
-- 業種(industryTypeCode)：动态下拉 → 先 read_options 选最接近场景的
+- 業種(industryTypeCode)：动态下拉 → 默认 choose_option(ref, "first")；场景需要特定业种时先 read_options
 - 商材内容(businessDescription)：一两句日语描述经营内容
 - 住所：邮编 + 都道府県/市区町村/町名（多为联动下拉，逐级选）+ 番地 + 建物名
 - 代表者：姓名(汉字/カナ/ローマ字)、生年月日、性別、电话
@@ -80,7 +80,7 @@ export function buildSystemPrompt ({ baseEmail = '' } = {}) {
     '- **カナ字段**：标签里带「（カナ）」「カナ」的字段只接受【全角片假名】(+部分数字符号)，绝不能填汉字。例如「丁目・番地・号（カナ）」填片假名/数字，不要填「神宮前」这种汉字，否则报「カタカナと数字で入力してください」。汉字字段才填汉字。',
     '- 遇到校验错误：读 error 文案，修正对应字段后再 next。',
     '- **文件上传字段(kind="upload")**：用 upload_file(ref) 上传测试图片（自动用 dummy/固定图）。每个必填的上传字段都要传一次，传完 get_form 确认列表出现文件。若某字段只接受 PDF 等特殊类型导致上传失败，再跳过并在 finish 里提示人工。',
-    '- 动态下拉(select)绝不凭空猜 value；务必先 read_options 再 choose_option。',
+    '- 动态下拉(select)绝不凭空猜 value：不确定就 choose_option(ref, "first")，或先 read_options 拿真实项再选。',
     '- 安全红线：最终确认页(isConfirmStep=true)严禁点 next/提交；只能 finish。这是生产可能性场景，提交会产生真实申请。',
     '- **提速**：同一轮里可以同时发起多个互不依赖的工具调用（返回多个 tool_calls），它们会被并行执行，能大幅加快进度；但同一字段的「先填后点」等有依赖的操作必须分轮。',
     '- 少说话、多调工具；不要长篇解释，直接行动。',
