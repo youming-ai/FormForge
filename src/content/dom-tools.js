@@ -94,7 +94,10 @@ async function chooseOption (ref, option) {
       for (let attempt = 1; attempt <= 2; attempt++) {
         await openSelect(r.item)
         const opts = optionsOf(r.item).filter(usableOption)
-        const target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
+        // option="first"：直接选第一个可用项（校验只要求必填的场景最快路径）
+        const wantFirst = /^first$|^第一个$|^默认$/i.test(String(option).trim())
+        const target = wantFirst ? opts[0]
+          : (opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option)))
         if (!target) {
           const list = opts.slice(0, 20).map(optText).join(' / ')
           await closeSelect(r.item)

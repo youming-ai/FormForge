@@ -28,7 +28,7 @@ export const TOOLS = [
     { ref: { type: 'string' }, value: { type: 'string' } },
     ['ref', 'value']),
   fn('choose_option',
-    '为 select/radio/checkbox 选一项。select/radio 传 option=标签文本或 value；checkbox 传 option="check" 或 "uncheck"(同意条款一律 check)。select 不确定合法 option 时先调 read_options。',
+    '为 select/radio/checkbox 选一项。select/radio 传 option=标签文本或 value；select 传 option="first" 可直接选第一个可用项（必填校验只要求非空时的最快路径，不确定选什么就用它）；checkbox 传 option="check" 或 "uncheck"(同意条款一律 check)。需要特定选项时先 read_options。',
     { ref: { type: 'string' }, option: { type: 'string', description: '标签文本/value，或 check/uncheck' } },
     ['ref', 'option']),
   fn('set_date',
