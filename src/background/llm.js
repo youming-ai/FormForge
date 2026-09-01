@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
   endpoint: 'http://10.0.0.64:8800/v1/chat/completions',
   // 需支持 function calling；llama-swap 会按需 JIT 换入未加载的模型（首次有冷加载延迟）
-  model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',
+  model: 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
@@ -36,9 +36,18 @@ export async function resolveModel (settings) {
   return 'local-model'
 }
 
-export async function callLLM ({ endpoint, model, messages, tools }) {
+export async function callLLM ({ endpoint, model, messages, tools, signal }) {
   const ctrl = new AbortController()
   let timedOut = false
+  let callerAborted = false
+  const onAbort = () => {
+    callerAborted = true
+    ctrl.abort()
+  }
+  if (signal) {
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
+  }
   const timer = setTimeout(() => { timedOut = true; ctrl.abort() }, LLM_TIMEOUT_MS)
   let resp
   try {
@@ -59,9 +68,11 @@ export async function callLLM ({ endpoint, model, messages, tools }) {
     })
   } catch (err) {
     if (timedOut) throw new Error(`推理服务响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：可能正在冷加载模型或队列拥堵，请重试`)
+    if (callerAborted || signal?.aborted) throw new Error('模型请求已取消')
     throw new Error(`连不上推理服务 (${endpoint})：${err?.message || err}。确认 llama-server/llama-swap 或 LM Studio 已启动并可从本机访问。`)
   } finally {
     clearTimeout(timer)
+    signal?.removeEventListener('abort', onAbort)
   }
   if (!resp.ok) {
     const t = await resp.text().catch(() => '')

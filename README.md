@@ -8,7 +8,7 @@
 
 ```
 浮窗(content) ──start──▶ background(service worker)
-                              │  POST LM Studio /v1/chat/completions（工具调用循环）
+                              │  POST LM Studio /v1/chat/completions（工具调用循环，长历史自动压缩）
                               ▼
                          模型决定调哪个工具(tool_calls)
                               │  agent:exec
@@ -25,23 +25,24 @@
 | 工具 | 作用 |
 |---|---|
 | `get_form` | 读当前步骤快照（字段 ref/类型/值/校验错误 + 按钮 + 是否确认页） |
-| `read_options` | **打开下拉读真实选项**（业种/银行/支店/plan 等动态字段的关键） |
-| `fill_text` | 填文本/多行 |
-| `choose_option` | 选 select/radio/checkbox（同意条款 = check） |
+| `read_options` | **打开下拉读真实选项**（业种/银行/支店/plan 等动态字段的关键）；可传 `query` 在下拉搜索框里搜关键词（银行/支店等远程分页下拉必用） |
+| `fill_text` | 填文本/多行/数字金额（es-input-currency 自动补失焦归一化） |
+| `choose_option` | 选 select/radio/checkbox/可点卡片（料金プラン、取引形態卡片；同意条款 = check） |
 | `set_date` | 设日期选择器 |
-| `click` | 点任意按钮/卡片（如「住所自動入力」） |
+| `click` | 点任意按钮/卡片/快捷链接（「住所自動入力」「検索：法人番号」「代表者と同一」等） |
 | `upload_file` | 向上传字段塞测试图片（默认生成 dummy PNG / 面板固定图） |
 | `click_button` | next/back（确认页禁止前进，硬拦截，只能 finish） |
 | `finish` | 结束（到确认页 / 无法继续） |
 
 ## 安装
 
-1. 准备一个 OpenAI 兼容的本地推理服务（llama.cpp / llama-swap 或 LM Studio），加载一个**支持 function calling** 的模型（如 Qwen3-30B-A3B），开启对外监听。
+1. 准备一个 OpenAI 兼容的本地推理服务（llama.cpp / llama-swap 或 LM Studio），加载一个**支持 function calling** 的模型（如 Gemma 4 26B A4B），开启对外监听。
 2. `chrome://extensions/` → 开发者模式 → 加载已解压扩展 → 选本目录。
 3. 打开加盟店申请**新建**表单页 → 右下角出现浮窗 → 展开「设置」确认接口地址/模型 → 保存。
    - 默认接口 `http://10.0.0.64:8800/v1/chat/completions`（macstudio llama.cpp/llama-swap）；LM Studio Tailscale 用 `http://100.96.69.27:8434/...`；本机用 `http://localhost:1234/...`。
-   - 模型默认 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`，填 `auto` 则调 `/v1/models` 自动选已加载模型（llama-swap 未加载的模型会按需 JIT 换入，首次有冷加载延迟）。
-4. 填场景（可留空）→「开始填写」→ 看浮窗里 agent 的实时动作日志。
+   - 模型默认 `unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M`，填 `auto` 则调 `/v1/models` 自动选已加载模型（llama-swap 未加载的模型会按需 JIT 换入，首次有冷加载延迟）。
+4. 填场景（可留空）→「开始填写」→ 看浮窗里 agent 的实时动作日志（含每轮性能耗时）。
+   - 中途点击「停止」会取消正在等待的模型请求；已经发出的页面操作会按当前组件生命周期完成，不会再开启下一轮。
 
 > 点扩展图标可切换浮窗显示/隐藏。
 
@@ -49,6 +50,7 @@
 
 - **必须用支持 function calling 的模型**。小模型在长 agentic 循环里可能不稳；不行就换大一点的（如 qwen3.5-27b/32b）。
 - **文件上传**：agent 用 `upload_file` 自动上传图片——默认 canvas 生成的 dummy PNG，或在面板「设置 → 固定上传图片」里指定一张固定图（≤4MB，存为 dataURL）。会真正上传到 OSS。只接受 PDF 等特殊类型的字段可能失败，会提示人工。
+- **针对 legacy `ApplyForm/steps` 的适配**：取引形態/料金プラン自定义卡片、FileUploader 自定义列表项、CheckButton 快捷复制（「代表者と同一」等）、法人番号捜索按钮、ZipInput「住所自動入力」（填完邮编才可点、必须点击才带出地址）、银行/支店远程分页搜索均已适配。夹具测试：`node scripts/test-snapshot.mjs` 与 `node scripts/test-choose.mjs`。
 - **生产环境 `business.elepay.io`**：浮窗显示橙色警示；agent 到确认页**只 finish、绝不提交**（`click_button` 在确认页被硬拦截）。手动也别提交测试数据。测试优先 sandbox/stg。
 - **选择器**针对 legacy `ApplyForm`（`.merchant-apply-info__*` / Ant 组件）；OEM 新版 class 不同时需适配 `content.js`。
 - **日期/联动地址**等复杂组件 best-effort，失败时 agent 会从 `get_form` 的 value 看出来重试；个别仍需人工。

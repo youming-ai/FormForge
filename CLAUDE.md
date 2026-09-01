@@ -6,7 +6,7 @@
 
 ## 架构
 
-- **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；MAX_TURNS=120，耗尽时明确提示。
+- **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、任务级 stop 取消、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；历史超过 30,000 字符时保留最近 4 组完整工具消息；运行日志带每轮模型/工具耗时；MAX_TURNS=120，耗尽时明确提示。
 - **手** `src/content/dom-tools.js`：DOM 工具执行器，含 select 互斥锁与字段专属下拉定位（aria-owns）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「住所自動入力」等异步按钮轮询表单值变化（最多 3s）。`utils.js`（通用工具）/`snapshot.js`（快照+ref）/`panel.js`（浮窗 UI）/`main.js`（消息总线）由 manifest `content_scripts.js` **按序注入共享同一隔离环境**（零构建，不能 import/export）。
 - **眼** `src/content/snapshot.js` 的 `buildSnapshot`：把当前步骤快照、真实下拉选项喂回模型。已填的 radio/cards 不再带 options 列表省 token。
 - `tools.js` 工具定义（OpenAI function 格式）；`system-prompt.js` agent 指令 + 字段/枚举/日语格式指南。
@@ -14,7 +14,7 @@
 ## 运行配置
 
 - 默认 endpoint `http://10.0.0.64:8800/v1/chat/completions`（macstudio **llama.cpp/llama-swap**，OpenAI 兼容 + function calling，已实测）。备选：LM Studio Tailscale `100.96.69.27:8434`（注意 LM Studio 的 8434 LAN 口 2025-xx 起不可达），本机 `localhost:1234`。
-- 默认模型 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`（llama.cpp GGUF 版，未加载时 llama-swap 按需 JIT 换入，首次有冷加载延迟；同服务器已加载可用的替代：`unsloth/Qwen3.8-27B-GGUF:8-27B-Q4_K_M` 已验证 tool calling）；填 `auto` 则调 `/v1/models` 自动选已加载模型。
+- 默认模型 `unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M`（llama.cpp GGUF 版，已验证 tool calling；未加载时 llama-swap 会按需 JIT 换入）；填 `auto` 则调 `/v1/models` 自动选择模型。
 - 设置存 `chrome.storage.local.agentSettings = {endpoint, model, baseEmail, uploadImage}`，面板可改（基础邮箱可清空恢复自动探测，固定图片可移除）。
 - 改 manifest `host_permissions` / `content_scripts.matches` 切环境（已含四个表单域名）。
 
@@ -25,13 +25,18 @@
 - **scope** = `.merchant-apply-info__content`；步骤标题 `.merchant-apply-info__title`；导航按钮区 `.merchant-apply-info__action`（primary=下一步/提交，default=返回）。
 - **确认页**：出现 `.merchant-apply-info__section` 即 `isConfirmStep`。`click_button` 在确认页**硬拦截**，只允许 `finish`，绝不提交（生产会产生真实申请）。
 - **字段扫描**：遍历 `.ant-form-item` 取叶子（`!querySelector('.ant-form-item')`）。每字段给 `ref/kind/label/value/required/filled/error`。kind: text/textarea/select/radio/checkbox/date/upload/cards/unknown。
-- **地址组 `AddressInputGroup`**：每个子字段（prefecture.kanji/kana、city、town、丁目番地、建物名…）**是独立 a-form-item，但无 label 文字、只有 placeholder**（「都道府県（カナ）」等）→ label 兜底用 `placeholderOf()`。必填靠 **`aria-required`** 而非 `.ant-form-item-required` → `isRequired()` 两者都查。**流程**：填邮编 → click「住所自動入力」按钮（ZipInput，i18n key `search`）异步带出汉字+カナ → 再填丁目番地/建物名。
+- **地址组 `AddressInputGroup`**：每个子字段（prefecture.kanji/kana、city、town、丁目番地、建物名…）**是独立 a-form-item，但无 label 文字、只有 placeholder**（「都道府県（カナ）」等）→ label 兜底用 `placeholderOf()`。必填靠 **`aria-required`** 而非 `.ant-form-item-required` → `isRequired()` 两者都查。legacy `ZipInput` **不会自动带出**地址：填完邮编后 actions 里才出现「住所自動入力」按钮（`:disabled="!value"`），必须 click 它 → axios 查 `/zips/{zip}` → `@fetched` 带出汉字+カナ（streetAddress/building 留空手填）。
 - **カナ字段**：label 带「（カナ）」只接受全角片假名，填汉字报「カタカナと数字で入力してください」。
-- **料金プラン**：自定义可点卡片 `.plan-select__plan`（选中加 `.active`），非标准 Ant 控件 → 单独识别为 `kind:'cards'`，choose_option 点匹配卡片。
+- **可点卡片（kind:'cards'）**：① 料金プラン `PlanSelect`：`ApplyFormNew` 用 `.plan-select__plan`（选中 `.active`），legacy 用 `.plan-select` 直接子卡片（标题 `.font-bold`，选中 `border-[#1890ff] bg-blue-50`）；② `ContractSelect` 取引形態（`isSupportBusinessSubtype` 开启时）用 `.default-select-business-type-item` 卡片（选中 `bg-blue-50 active-select-business-type-item`），卡片内嵌无 label 的 transactionSubType checkbox/radio。快照统一 `planCardsOf`（BEM 优先，否则取根的直接子元素、剔除 a/button）+ `planIsActive` + `planTitleOf` 兼容；卡片内子选项靠 `contextualLabel`（祖先 form-item 标签 + `·子字段N`）定位。
 - **日期选择器**：`a-date-picker`，格式 **`YYYY/MM/DD`（斜杠）**。set_date 走 开面板→键入完整日期→Enter→blur→回读校验（连字符作回退）。
-- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 必须 `read_options`（开 dropdown 读 `.ant-select-item-option`）再 `choose_option`。
-- **文件上传** `.ant-upload`：隐藏 `input[type=file]`，用 `DataTransfer` 塞 File + dispatch `change` 触发 rc-upload（真传 OSS）。`upload_file` 默认 canvas 生成 dummy PNG，或面板固定图（dataURL）。只收 PDF 等的字段会失败。
+- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 必须 `read_options`（开 dropdown 读 `.ant-select-item-option`，可传 `query` 搜索词）再 `choose_option`；联动字段要先父后子、每次改动后重新 get_form。
+- **文件上传**：`FileUploader` 包装 a-upload 但用**自定义 itemRender**（`.file-downloader-item`，**没有** `.ant-upload-list-item`）——计数/成功检测必须两者都查。隐藏 `input[type=file]`，用 `DataTransfer` 塞 File + dispatch `change` 触发 rc-upload → `fileApi.upload` 真传 OSS，成功后列表项才出现。`upload_file` 默认 canvas 生成 dummy PNG，或面板固定图（dataURL）。只收 PDF 等的字段会失败。
 - **checkbox**：点 `input.ant-checkbox-input`；点后 sleep 复读状态防「读到旧状态→再点→翻转」的反复勾选。
+- **无 label/placeholder 字段**（法人格两个 es-search-select、取引子选项）：`contextualLabel()` 向上找带 label 的祖先 form-item，返回「祖先标签·子字段N」。
+- **非 button 可点元素**：`CheckButton`（「代表者と同一」「お店と同じ情報」等）是 `<a>` + `.es-icon`（选中 `.active`），不在 form-item 里 → 快照把含 `.es-icon` 的 `a` 收进 actions，label 带 `[已选✓]/[未选]` 前缀；纯图标按钮（法人番号 `a-input-search` 捜索钮）剔除 `.anticon` 后无文本 → label 兑底 `捜索：字段名`。
+- **法人番号**（法人时）：`LegalRegistrationNoInput` = `a-input-search`（首位 addon），填 13 位后点捜索钮 → `/corps` 查询 → `@fetched=updateCorp` 自动带出法人格/会社名/郵便番号；随机编号查不到则手填。
+- **银行/支店**：`BankSelect`/`BranchSelect` = es-search-select 远程分页（20/页）→ read_options 必须带 query 搜关键词。
+- **测试**：`node scripts/test-snapshot.mjs`、`node scripts/test-choose.mjs`（jsdom 跑 `test/legacy-form.fixture.html` 夹具，验证快照/卡片选择/upload 路径；无 Vue 响应导致的「未检测到选中态」属预期）。
 
 ## Agent 行为约束（system-prompt.js）
 
