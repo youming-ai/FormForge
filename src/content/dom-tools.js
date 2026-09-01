@@ -24,6 +24,14 @@ function optionsOf (item) {
   return [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')]
 }
 
+function outsideClick () {
+  // 顺序接近真实交互：pointerdown → mousedown → click（rc-select 关浮层监听 pointerdown/mousedown）
+  try { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* 旧浏览器忽略 */ }
+  document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  document.body.click()
+}
+const anyOpenDropdown = () => document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+
 // select 操作互斥：并行批量执行工具时防止多个下拉互相开合/串台
 let selectQueue = Promise.resolve()
 function withSelectLock (fn) {
@@ -33,6 +41,13 @@ function withSelectLock (fn) {
 }
 
 async function openSelect (item) {
+  // 已有打开的浮层（含本字段的）：先全局关掉，否则 selector 上的 mousedown 会变成「切换→关闭」
+  if (anyOpenDropdown()) {
+    outsideClick()
+    await sleep(100)
+    outsideClick()
+    await sleep(100)
+  }
   const selector = item.querySelector('.ant-select-selector') || item.querySelector('.ant-select')
   selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   selector?.click()
@@ -48,16 +63,12 @@ async function openSelect (item) {
 async function closeSelect (item) {
   const input = item.querySelector('input')
   input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  const dd = dropdownEl(item)
-  if (dd) {
-    if (!dd.classList.contains('ant-select-dropdown-hidden')) {
-      await sleep(80)
-      if (!dd.classList.contains('ant-select-dropdown-hidden')) document.body.click() // Escape 没关掉才用全局点击，避免误关其它浮层
-    }
-  } else {
-    await sleep(60)
-    document.body.click()
-  }
+  const dd = dropdownEl(item) || anyOpenDropdown()
+  if (dd && !dd.classList.contains('ant-select-dropdown-hidden')) outsideClick()
+  // 主动等浮层真正隐藏；800ms 还在就再补一轮外部点击
+  const closed = await waitFor(() => !anyOpenDropdown(), { timeout: 800, step: 60 })
+  if (!closed) await sleep(120)
+  return closed
 }
 
 async function fillText (ref, value) {
@@ -80,20 +91,30 @@ async function chooseOption (ref, option) {
 
   if (r.kind === 'select') {
     return withSelectLock(async () => {
-      await openSelect(r.item)
-      const opts = optionsOf(r.item).filter(usableOption)
-      let target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
-      if (!target) {
-        const list = opts.slice(0, 20).map(optText).join(' / ')
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        await openSelect(r.item)
+        const opts = optionsOf(r.item).filter(usableOption)
+        const target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
+        if (!target) {
+          const list = opts.slice(0, 20).map(optText).join(' / ')
+          await closeSelect(r.item)
+          return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级；或远程分页下拉，请用 read_options 传 query 搜索关键词)'}` }
+        }
+        const wanted = optText(target)
+        // 完整鼠标序列（rc-select 部分路径依赖 mousedown）
+        try { target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* ignore */ }
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+        target.click()
+        const selected = await waitFor(() => [...r.item.querySelectorAll('.ant-select-selection-item')]
+          .some(el => optText(el) === wanted), { timeout: 700, step: 50 })
+        if (selected) return { ok: true, result: `已选「${labelOf(r.item)}」= ${wanted}` }
         await closeSelect(r.item)
-        return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级)'}` }
+        await sleep(150)
       }
-      const wanted = optText(target)
-      target.click()
-      const selected = await waitFor(() => [...r.item.querySelectorAll('.ant-select-selection-item')]
-        .some(el => optText(el) === wanted), { timeout: 700, step: 50 })
-      if (!selected) return { ok: false, result: `点击选项「${wanted}」后未检测到选中状态，请 get_form 复核` }
-      return { ok: true, result: `已选「${labelOf(r.item)}」= ${wanted}` }
+      const dd = dropdownEl(r.item)
+      const n = dd ? dd.querySelectorAll('.ant-select-item-option').length : 0
+      return { ok: false, result: `点击选项「${option}」重试 2 次均未生效（浮层内选项 DOM ${n} 个，下拉${anyOpenDropdown() ? '仍打开' : '已关闭'}）。请 get_form 复核实际值，或用 read_options 确认当前可选项` }
     })
   }
 
@@ -225,7 +246,7 @@ async function clickElement (ref) {
   return { ok: true, result: `已点击 ${ref}（如为「住所自動入力」，请 get_form 复核地址是否带出汉字+カナ）` }
 }
 
-async function readOptions (ref) {
+async function readOptions (ref, query = '') {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
   if (r.kind === 'radio') {
@@ -237,9 +258,27 @@ async function readOptions (ref) {
   if (r.kind !== 'select') return { ok: false, result: `字段类型 ${r.kind} 没有可读选项` }
   return withSelectLock(async () => {
     await openSelect(r.item)
+    const keyword = String(query || '').trim()
+    if (keyword) {
+      // EsSearchSelect 银行/支店等远程分页下拉：在下拉搜索框键入关键词再读
+      const input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
+      if (!input) {
+        await closeSelect(r.item)
+        return { ok: false, result: `下拉「${labelOf(r.item)}」没有可用搜索框，无法搜索「${keyword}」` }
+      }
+      setNativeValue(input, keyword)
+      await sleep(700) // EsSearchSelect 远程搜索 debounce 500ms + 接口耗时
+      await waitFor(() => {
+        const dd = dropdownEl(r.item)
+        const vis = dd || anyOpenDropdown()
+        return !!vis && optionsReady(vis)
+      }, { timeout: 3000, step: 80 })
+    }
     const opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
     await closeSelect(r.item)
-    return { ok: true, result: { count: opts.length, options: opts.slice(0, 60) } }
+    const res = { count: opts.length, options: opts.slice(0, 60) }
+    if (keyword) res.query = keyword
+    return { ok: true, result: res }
   })
 }
 
@@ -319,7 +358,7 @@ async function clickButton (target) {
 async function execTool (name, input) {
   switch (name) {
     case 'get_form': return { ok: true, result: buildSnapshot() }
-    case 'read_options': return readOptions(input.ref)
+    case 'read_options': return readOptions(input.ref, input.query)
     case 'fill_text': return fillText(input.ref, input.value)
     case 'choose_option': return chooseOption(input.ref, input.option)
     case 'set_date': return setDate(input.ref, input.year, input.month, input.day)
