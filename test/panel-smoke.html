@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="UTF-8"><title>panel smoke</title></head>
+<body>
+<h1>panel smoke test</h1>
+<script>
+window.chrome = {
+  storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } },
+  runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({ ok: true }) },
+}
+</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/panel.js"></script>
+<script type="application/json" id="results-json">{"status":"running"}</script>
+<script>
+(async function () {
+  const cases = []
+  const assert = (c, n, d = '') => cases.push({ ok: !!c, name: n, detail: c ? '' : d })
+  const eq = (a, b, n) => assert(a === b, n, `got=${JSON.stringify(a)} want=${JSON.stringify(b)}`)
+
+  createPanel()
+
+  // 1. 面板挂载 + shadow 结构
+  const host = document.getElementById('__apply_agent_host')
+  assert(host && host.shadowRoot, '面板已挂载且 shadow DOM 存在')
+  const root = host.shadowRoot
+  const card = root.getElementById('card')
+  assert(card, '卡片存在')
+  const startBtn = root.getElementById('start')
+  eq(startBtn.textContent, '开始自动填写', '待机态按钮文案')
+  eq(startBtn.className, 'btn idle', '待机态按钮样式 idle')
+  eq(root.getElementById('headstatus').textContent, '就绪', '头部状态词')
+
+  // 2. 场景自动增高
+  const scenario = root.getElementById('scenario')
+  scenario.value = 'line1\nline2\nline3'
+  scenario.dispatchEvent(new Event('input'))
+  assert(scenario.style.height !== '' && scenario.style.height !== 'auto', '场景 textarea 自动增高', scenario.style.height)
+
+  // 3. 运行态：单按钮变红「停止」+ 日志自动展开
+  setRunning(true)
+  eq(startBtn.textContent, '停止', '运行态按钮文案=停止')
+  eq(startBtn.className, 'btn stop', '运行态按钮类 stop')
+  eq(card.classList.contains('running'), true, 'running 类')
+  eq(root.getElementById('logbox').open, true, '运行中日志自动展开')
+
+  // 4. 日志写入
+  panelLog('tool', 'choose_option {"ref":"e0"}')
+  panelLog('result', '已选「業種（カテゴリ）」= 東京', { ok: true })
+  panelLog('result', '未找到选项「x」', { ok: false })
+  panelLog('done', '✅ 完成', {})
+  eq(root.getElementById('log').children.length, 4, '日志 4 条')
+  assert(root.getElementById('log').querySelector('.c-result.err'), '失败结果标红')
+
+  // 5. 结束态复位
+  setRunning(false)
+  eq(startBtn.textContent, '开始自动填写', '结束态按钮复位')
+  eq(startBtn.className, 'btn idle', '结束态按钮类 idle')
+  eq(card.classList.contains('running'), false, 'running 类移除')
+  eq(root.getElementById('headstatus').textContent, '已结束', '头部状态已结束')
+
+  // 6. 折叠
+  root.getElementById('collapse').click()
+  eq(root.getElementById('body').classList.contains('hidden'), true, '折叠生效')
+  root.getElementById('collapse').click()
+  eq(root.getElementById('body').classList.contains('hidden'), false, '展开生效')
+
+  // 7. 状态词映射
+  setStatus('设置已保存'); eq(root.getElementById('headstatus').textContent, '设置已保存', '状态词-保存')
+  setStatus('推理服务响应超时（>5 分钟）'); eq(root.getElementById('headstatus').textContent, '需要处理', '状态词-超时')
+  setStatus('已达最大轮数 120，自动停止'); eq(root.getElementById('headstatus').textContent, '需要处理', '状态词-达上限')
+  setRunning(true); eq(root.getElementById('headstatus').textContent, '运行中', '状态词-运行中')
+  setRunning(false)
+
+  const p = cases.filter(c => c.ok).length
+  const f = cases.length - p
+  document.getElementById('results-json').textContent = JSON.stringify({ pass: p, fail: f, cases })
+  document.title = f ? `panel-smoke:${f}fail` : 'panel-smoke:allpass'
+})().catch(e => {
+  document.getElementById('results-json').textContent = JSON.stringify({ status: 'error', message: e.message, stack: (e.stack || '').split('\n').slice(0, 5) })
+  document.title = 'panel-smoke-error'
+})
+</script>
+</body>
+</html>
