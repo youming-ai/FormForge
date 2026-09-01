@@ -29,7 +29,7 @@
 - **カナ字段**：label 带「（カナ）」只接受全角片假名，填汉字报「カタカナと数字で入力してください」。
 - **料金プラン**：自定义可点卡片 `.plan-select__plan`（选中加 `.active`），非标准 Ant 控件 → 单独识别为 `kind:'cards'`，choose_option 点匹配卡片。
 - **日期选择器**：`a-date-picker`，格式 **`YYYY/MM/DD`（斜杠）**。set_date 走 开面板→键入完整日期→Enter→blur→回读校验（连字符作回退）。
-- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 默认 `choose_option(ref,"first")` 选第一个可用项（校验通常只要求非空，最稳最快）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动下拉（カテゴリ→詳細）必须分轮选**，不能同批并行。
+- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 默认 `choose_option(ref,"first")` 选第一个可用项（校验通常只要求非空，最稳最快）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动下拉（カテゴリ→詳細）必须分轮选**，不能同批并行。
 - **文件上传** `.ant-upload`：隐藏 `input[type=file]`，用 `DataTransfer` 塞 File + dispatch `change` 触发 rc-upload（真传 OSS）。`upload_file` 默认 canvas 生成 dummy PNG，或面板固定图（dataURL）。只收 PDF 等的字段会失败。
 - **checkbox**：点 `input.ant-checkbox-input`；点后 sleep 复读状态防「读到旧状态→再点→翻转」的反复勾选。
 
