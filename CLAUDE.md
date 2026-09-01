@@ -1,6 +1,6 @@
-# CLAUDE.md — 加盟店申请表单 AI Agent（浏览器内 · 本地 LM Studio）
+# CLAUDE.md — 通用表单自动填充 AI Agent（浏览器内 · 本地推理）
 
-纯浏览器内的 Chrome MV3 扩展：页面右下角浮窗，点「开始」后由**本地 LM Studio**（OpenAI 兼容 + function calling）通过 DOM 工具逐步填写 elepay-business 加盟店申请表单，读真实下拉选项、按校验纠错、走到确认页停下（**绝不提交**）。
+纯浏览器内的 Chrome MV3 **通用**表单填充扩展：点扩展图标在**任意页面**唤出浮窗（不自动注入），由**本地推理服务**（OpenAI 兼容 + function calling + **多模态识图**）通过 DOM 工具 + 页面截图逐步填写任意网页表单，读真实下拉选项、按校验纠错、走到确认页/提交前停下（**绝不提交**——最终提交类按钮文案有硬拦截词表 `SUBMIT_WORDS`）。扫描分层：Ant/elepay 优先适配 + 原生 HTML 表单兜底（label/fieldset/原生 input/select/textarea/radio/checkbox/date/file 全支持）。
 
 姊妹工具 `../elepay-apply-autofill-ext`：缓存注入式（LM Studio 生成完整 detail JSON 写 localStorage 后刷新，秒填）。本 agent 慢但智能，能处理动态字段/复杂控件/自我纠错。
 
@@ -8,13 +8,13 @@
 
 - **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同一批 tool_calls 并行下发**（select 在 content 侧自动排队）；MAX_TURNS=120，耗尽时明确提示。
 - **手** `src/content/dom-tools.js`：DOM 工具执行器，含 select 互斥锁与字段专属下拉定位（aria-owns）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「住所自動入力」等异步按钮轮询表单值变化（最多 3s）。`utils.js`（通用工具）/`snapshot.js`（快照+ref）/`panel.js`（浮窗 UI）/`main.js`（消息总线）由 manifest `content_scripts.js` **按序注入共享同一隔离环境**（零构建，不能 import/export）。
-- **眼** `src/content/snapshot.js` 的 `buildSnapshot`：把当前步骤快照、真实下拉选项喂回模型。已填的 radio/cards 不再带 options 列表省 token。
+- **眼** `src/content/snapshot.js` 的 `buildSnapshot`：把当前步骤快照、真实下拉选项喂回模型。已填的 radio/cards 不再带 options 列表省 token。**get_form 结果附带页面截图（多模态识图）**：background `captureVisibleTab` 截图后以 OpenAI `image_url` 格式附进 tool 消息，模型以截图里的真实渲染状态为准（自定义组件 DOM 读不到选项时靠看图）；需 `tabs` 权限，`resolveModel` 检测 `input_modalities` 决定是否附图（纯文本模型不附，防报错）；压缩历史时只保留最后一张截图。
 - `tools.js` 工具定义（OpenAI function 格式）；`system-prompt.js` agent 指令 + 字段/枚举/日语格式指南。
 
 ## 运行配置
 
 - 默认 endpoint `http://10.0.0.64:8800/v1/chat/completions`（macstudio **llama.cpp/llama-swap**，OpenAI 兼容 + function calling，已实测）。备选：LM Studio Tailscale `100.96.69.27:8434`（注意 LM Studio 的 8434 LAN 口 2025-xx 起不可达），本机 `localhost:1234`。
-- 默认模型 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`（llama.cpp GGUF 版，未加载时 llama-swap 按需 JIT 换入，首次有冷加载延迟；同服务器已加载可用的替代：`unsloth/Qwen3.8-27B-GGUF:8-27B-Q4_K_M` 已验证 tool calling）；填 `auto` 则调 `/v1/models` 自动选已加载模型。
+- 默认模型 `unsloth/Qwen3.8-27B-GGUF:8-27B-Q4_K_M`（llama.cpp GGUF，**已加载、已实测 tool calling + 图像输入**，`input_modalities` 含 image → get_form 附截图；未加载时 llama-swap 按需 JIT 换入，首次有冷加载延迟；纯文本备选 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`，多模态备选 `unsloth/gemma-4-26B-A4B-it-GGUF`）；填 `auto` 则调 `/v1/models` 自动选「已加载的对话模型」（排除 embed/asr/rerank）。
 - 设置存 `chrome.storage.local.agentSettings = {endpoint, model, baseEmail, uploadImage}`，面板可改（基础邮箱可清空恢复自动探测，固定图片可移除）。
 - 改 manifest `host_permissions` / `content_scripts.matches` 切环境（已含四个表单域名）。
 
@@ -29,7 +29,7 @@
 - **カナ字段**：label 带「（カナ）」只接受全角片假名，填汉字报「カタカナと数字で入力してください」。
 - **料金プラン**：自定义可点卡片 `.plan-select__plan`（选中加 `.active`），非标准 Ant 控件 → 单独识别为 `kind:'cards'`，choose_option 点匹配卡片。
 - **日期选择器**：`a-date-picker`，格式 **`YYYY/MM/DD`（斜杠）**。set_date 走 开面板→键入完整日期→Enter→blur→回读校验（连字符作回退）。
-- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 必须 `read_options`（开 dropdown 读 `.ant-select-item-option`）再 `choose_option`。
+- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 默认 `choose_option(ref,"random")`（random=从可用项随机选，避免每次同一值；`first` 仍兼容）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动下拉（カテゴリ→詳細）必须分轮选**，不能同批并行。
 - **文件上传** `.ant-upload`：隐藏 `input[type=file]`，用 `DataTransfer` 塞 File + dispatch `change` 触发 rc-upload（真传 OSS）。`upload_file` 默认 canvas 生成 dummy PNG，或面板固定图（dataURL）。只收 PDF 等的字段会失败。
 - **checkbox**：点 `input.ant-checkbox-input`；点后 sleep 复读状态防「读到旧状态→再点→翻转」的反复勾选。
 
@@ -50,4 +50,4 @@ elepay：`business.elepay.io`(prod) / `business.sandbox-elepay.com` / `stg-busin
 - 下个最可能要调的点：复杂联动控件、日期 picker 若 readonly 需改「点面板日期格」、「住所自動入力」若 click 没触发异步查询需换触发方式。
 - **不要**引入 agent-sdk/打包构建（MV3 不能运行时 require，上 SDK 要 bundler，破坏即装即用；background 已按 ES module 拆分 `src/background/`，content 侧靠 manifest 多文件按序注入共享作用域，均零构建；工具循环本身才几十行）。
 - 字段/枚举/日语格式权威来源：elepay-business `ApplyForm/steps/*` 与姊妹工具 `../elepay-apply-autofill-ext/schema.js`。
-- 图标：`icons/make_icons.py` 程序化生成（蓝渐变+表单+勾+AI 徽标），改设计改脚本重跑即可，无需素材文件。
+- 图标：`icons/make_icons.py` 程序化生成（纯色蓝圆角方块+白色对勾，简洁版），改设计改脚本重跑即可，无需素材文件。

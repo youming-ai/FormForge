@@ -7,8 +7,13 @@ const usableOption = o =>
   o.getAttribute('aria-disabled') !== 'true' &&
   !o.classList.contains('ant-select-item-option-disabled') &&
   !o.classList.contains('es-options-item-tips')
-const optionsReady = root =>
-  [...root.querySelectorAll('.ant-select-item-option')].some(usableOption) || !!root.querySelector('.ant-empty')
+// 下拉状态：'usable' 有可用选项 / 'empty' 空态 / false 仍加载中。
+// 注意：空态(.ant-empty)若立即当作就绪，会在异步选项还没到达时就提前返回，拿到空列表。
+const optionState = root => {
+  if (!root) return false
+  if ([...root.querySelectorAll('.ant-select-item-option')].some(usableOption)) return 'usable'
+  return root.querySelector('.ant-empty') ? 'empty' : false
+}
 
 // 定位该字段专属的下拉浮层（aria-owns / aria-controls），避免读到其它字段的下拉；取不到则退回全局
 function dropdownEl (item) {
@@ -18,10 +23,30 @@ function dropdownEl (item) {
     (inp && (inp.getAttribute('aria-controls') || inp.getAttribute('aria-owns')))
   return id ? document.getElementById(id) : null
 }
-function optionsOf (item) {
+// 完整按下序列：真实点击 = pointerdown → mousedown → mouseup → click。
+// rc-select 打开浮层/选中选项都在 mousedown 上响应，仅 click() 不够。
+function pressEl (el) {
+  try { el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* 旧环境忽略 */ }
+  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+  el.click()
+}
+
+// 该字段当前生效的浮层：优先 aria-owns 定位；其上没有选项时退回「当前可见浮层」。
+// 有的组件重渲染后 aria-owns 仍指向旧节点（显示空态），真实带选项的浮层是另一个节点——
+// 这就是「用户能看到选项、代码却读到空」的原因。
+function activeDropdown (item) {
   const dd = dropdownEl(item)
-  if (dd) return dd.classList.contains('ant-select-dropdown-hidden') ? [] : [...dd.querySelectorAll('.ant-select-item-option')]
-  return [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option')]
+  const vis = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+  if (dd && !dd.classList.contains('ant-select-dropdown-hidden')) {
+    if (dd.querySelector('.ant-select-item-option')) return dd
+    return vis || dd
+  }
+  return vis
+}
+function optionsOf (item) {
+  const root = activeDropdown(item)
+  return root ? [...root.querySelectorAll('.ant-select-item-option')] : []
 }
 
 function outsideClick () {
@@ -41,24 +66,22 @@ function withSelectLock (fn) {
 }
 
 async function openSelect (item) {
-  // 已有打开的浮层（含本字段的）：先全局关掉，否则 selector 上的 mousedown 会变成「切换→关闭」
+  // 其它浮层开着会把本次 mousedown 当成外部点击（或 toggle 成关闭）：先关掉并等它收起
   if (anyOpenDropdown()) {
     outsideClick()
-    await sleep(100)
-    outsideClick()
-    await sleep(100)
+    await waitFor(() => !anyOpenDropdown(), { timeout: 400, step: 50 })
   }
   const selector = item.querySelector('.ant-select-selector') || item.querySelector('.ant-select')
-  selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-  selector?.click()
-  // 等下拉浮层出现且渲染出「可用」选项（动态接口选项可能异步到达）；搜索型下拉给 4s
-  const timeout = item.querySelector('.es-search-select') ? 4000 : 1400
-  await waitFor(() => {
-    const dd = dropdownEl(item)
-    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && optionsReady(dd)
-    const visibleDropdown = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-    return !!visibleDropdown && optionsReady(visibleDropdown)
-  }, { timeout, step: 50 })
+  pressEl(selector) // 完整按下序列打开浮层
+  // 聚焦搜索框：动态下拉的选项异步加载常挂在 focus 上
+  const input = item.querySelector('.ant-select-selection-search-input, .ant-select input')
+  if (input) {
+    input.focus()
+    input.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
+  }
+  // 等「可见浮层」里出现可用选项（动态接口选项异步到达）；搜索型下拉给 4s
+  const timeout = item.querySelector('.es-search-select') ? 4000 : 2500
+  return await waitFor(() => optionState(activeDropdown(item)) === 'usable', { timeout, step: 50 })
 }
 async function closeSelect (item) {
   const input = item.querySelector('input')
@@ -90,62 +113,111 @@ async function chooseOption (ref, option) {
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
 
   if (r.kind === 'select') {
+    // 原生 <select>：直接设值（不走 Ant 互斥锁/浮层逻辑）
+    if (!r.item.querySelector('.ant-select')) {
+      const sel = r.item.matches('select') ? r.item : r.item.querySelector('select')
+      if (!sel) return { ok: false, result: '该字段没有可用 select' }
+      const opts = [...sel.options].filter(o => (o.textContent || o.value || '').trim()).map(o => ({ o, t: (o.textContent || o.value).trim() }))
+      if (!opts.length) return { ok: false, result: '该下拉没有可选项' }
+      const want = String(option ?? '').trim()
+      const hit = /^(random|随机|任意)$/i.test(want) ? opts[Math.floor(Math.random() * opts.length)]
+        : /^(first|第一个|默认)$/i.test(want) ? opts[0]
+        : (opts.find(x => x.t === want) || opts.find(x => x.t.includes(want)))
+      if (!hit) return { ok: false, result: `未找到选项「${option}」。当前可选：${opts.slice(0, 20).map(x => x.t).join(' / ')}` }
+      sel.value = hit.o.value
+      sel.dispatchEvent(new Event('input', { bubbles: true }))
+      sel.dispatchEvent(new Event('change', { bubbles: true }))
+      return { ok: true, result: `已选「${labelOf(r.item) || r.ref || ''}」= ${hit.t}` }
+    }
     return withSelectLock(async () => {
       const norm = t => String(t || '').replace(/\s+/g, '')
-      const selectedText = () => [...r.item.querySelectorAll('.ant-select-selection-item')].map(el => optText(el))
-      const pressKey = (key) => {
+      const selectedTexts = () => [...r.item.querySelectorAll('.ant-select-selection-item')].map(el => optText(el))
+      // 键盘兜底：聚焦搜索框 → ArrowDown 激活首项 → Enter 选中
+      const kbSelect = async () => {
         const input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
         input?.focus?.()
-        const kc = { Enter: 13, ArrowDown: 40 }[key] || 0
-        for (const type of ['keydown', 'keyup']) {
-          (input || document.activeElement)?.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode: kc, which: kc, bubbles: true, cancelable: true }))
+        for (const [key, kc] of [['ArrowDown', 40], ['Enter', 13]]) {
+          for (const type of ['keydown', 'keyup']) {
+            (input || document.activeElement)?.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode: kc, which: kc, bubbles: true, cancelable: true }))
+          }
+          await sleep(80)
         }
       }
-      // 三段式：鼠标点击（真实序列）→ 回车（rc-select 打开后默认激活第一项）→ 方向键下移+回车
-      for (let attempt = 1; attempt <= 3; attempt++) {
+
+      // 目标解析：random=随机可用项（测试场景推荐）/ first=第一个 / 文本匹配
+      const resolveTarget = (opts) => {
+        const want = String(option ?? '').trim()
+        if (/^(random|随机|任意)$/i.test(want)) return opts[Math.floor(Math.random() * opts.length)]
+        if (/^(first|第一个|默认)$/i.test(want)) return opts[0]
+        return opts.find(o => optText(o) === want) || opts.find(o => optText(o).includes(want))
+      }
+
+      for (let attempt = 1; attempt <= 2; attempt++) {
         await openSelect(r.item)
         const opts = optionsOf(r.item).filter(usableOption)
-        // option="first"：直接选第一个可用项（校验只要求必填的场景最快路径）
-        const wantFirst = /^first$|^第一个$|^默认$/i.test(String(option).trim())
-        const target = wantFirst ? opts[0]
-          : (opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option)))
+
+        if (!opts.length) {
+          // 无可用选项：诊断需区分「aria-owns 浮层」与「当前可见浮层」（两者可能是不同节点）
+          const dd = dropdownEl(r.item)
+          const vis = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+          const empty = (vis || dd)?.querySelector('.ant-empty')
+          const diag = JSON.stringify({
+            raw: optionsOf(r.item).length,
+            emptyText: empty?.textContent?.trim() || '',
+            ownDropdown: dd ? (dd.classList.contains('ant-select-dropdown-hidden') ? 'hidden' : 'visible') : 'none',
+            visDropdown: vis ? 'visible' : 'none',
+            visOptions: vis ? vis.querySelectorAll('.ant-select-item-option').length : null,
+            sameNode: dd && vis ? dd === vis : null,
+            selectDisabled: !!r.item.querySelector('.ant-select-disabled'),
+          })
+          await closeSelect(r.item)
+          return { ok: false, result: `下拉无可用选项（诊断：${diag}）。可能是联动下拉需先选上级、选项未加载完，可稍后 read_options 重试` }
+        }
+
+        const target = resolveTarget(opts)
         if (!target) {
           const list = opts.slice(0, 20).map(optText).join(' / ')
           await closeSelect(r.item)
-          return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级；或远程分页下拉，请用 read_options 传 query 搜索关键词)'}` }
+          return { ok: false, result: `未找到选项「${option}」。当前可选：${list}` }
         }
         const wanted = optText(target)
 
         if (attempt === 1) {
-          try { target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* ignore */ }
-          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-          target.click()
-        } else if (attempt === 2) {
-          pressKey('Enter')
+          pressEl(target) // 完整按下序列（rc-select 在 mousedown 上响应选择）
         } else {
-          pressKey('ArrowDown')
-          await sleep(120)
-          pressKey('Enter')
+          await kbSelect() // 键盘兜底
         }
-        // 回读校验（whitespace 归一化，避免全角空格导致的假失败）
-        const selected = await waitFor(() => selectedText().some(t => norm(t) === norm(wanted) || norm(t).includes(norm(wanted))), { timeout: 700, step: 50 })
-        if (selected) {
-          const got = selectedText()[0] || wanted
-          return { ok: true, result: `已选「${labelOf(r.item)}」= ${got}${attempt > 1 ? `（${attempt === 2 ? '回车' : '方向键+回车'}兜底路径）` : ''}` }
+        // 回读校验：选中项出现且文本匹配（whitespace 归一化 + 双向 includes 容错）
+        const verified = await waitFor(
+          () => selectedTexts().some(t => norm(t) && (norm(t) === norm(wanted) || norm(t).includes(norm(wanted)) || norm(wanted).includes(norm(t)))),
+          { timeout: 800, step: 50 })
+        if (verified) {
+          const got = selectedTexts()[0] || wanted
+          return { ok: true, result: `已选「${labelOf(r.item)}」= ${got}${attempt > 1 ? '（键盘兜底）' : ''}` }
         }
         await closeSelect(r.item)
-        await sleep(150)
+        await sleep(120)
       }
-      const dd = dropdownEl(r.item)
-      const n = dd ? dd.querySelectorAll('.ant-select-item-option').length : 0
       const cur = (r.item.querySelector('.ant-select-selection-item')?.textContent || '').trim()
-      return { ok: false, result: `选择「${option}」三段式（点击/回车/方向键+回车）均未验证通过（浮层选项 DOM ${n} 个，下拉${anyOpenDropdown() ? '仍打开' : '已关闭'}，当前框内值：${cur || '空'}）。请 get_form 复核实际值再决定` }
+      return { ok: false, result: `选择「${option}」两次（点击/键盘）均未验证通过，当前框内值：${cur || '空'}。请 get_form 复核实际值再决定` }
     })
   }
 
   if (r.kind === 'radio') {
     const wraps = [...r.item.querySelectorAll('.ant-radio-wrapper')]
+    // 原生 radio（无 Ant wrapper）：按文本/值找 input 点击（radio 天然互斥）
+    if (!wraps.length) {
+      const radios = [...r.item.querySelectorAll('input[type="radio"]')]
+      if (!radios.length) return { ok: false, result: '该字段没有可选项' }
+      const by = i => (i.closest('label')?.textContent || i.value || '').trim()
+      const want = String(option ?? '').trim()
+      const target = /^(random|随机|任意)$/i.test(want) ? radios[Math.floor(Math.random() * radios.length)]
+        : (radios.find(i => by(i) === want) || radios.find(i => by(i).includes(want)))
+      if (!target) return { ok: false, result: `未找到单选项「${option}」，可选：${radios.map(by).join(' / ')}` }
+      target.click()
+      await waitFor(() => target.checked, { timeout: 400, step: 40 })
+      return { ok: true, result: `已选「${labelOf(r.item) || r.ref || ''}」= ${by(target)}` }
+    }
     const w = wraps.find(x => x.textContent.trim() === option) || wraps.find(x => x.textContent.trim().includes(option))
     if (!w) return { ok: false, result: `未找到单选项「${option}」，可选：${wraps.map(x => x.textContent.trim()).join(' / ')}` }
     w.click()
@@ -155,6 +227,25 @@ async function chooseOption (ref, option) {
 
   if (r.kind === 'checkbox') {
     const wraps = [...r.item.querySelectorAll('.ant-checkbox-wrapper')]
+    // 原生 checkbox（无 Ant wrapper）
+    if (!wraps.length) {
+      const inputs = [...r.item.querySelectorAll('input[type="checkbox"]')]
+      if (!inputs.length) return { ok: false, result: '该字段没有复选框' }
+      const by = i => (i.closest('label')?.textContent || i.value || '').trim()
+      if (option === 'check' || option === 'uncheck') {
+        const want = option === 'check'
+        let n = 0
+        inputs.forEach(i => { if (i.checked !== want) { i.click(); n++ } })
+        await waitFor(() => inputs.every(i => i.checked === want), { timeout: 600, step: 40 })
+        if (n === 0) return { ok: true, result: `复选框已是目标状态（当前勾选 ${inputs.filter(i => i.checked).length}/${inputs.length}）` }
+        return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框` }
+      }
+      const w = inputs.find(i => by(i).includes(option))
+      if (!w) return { ok: false, result: `未找到复选项「${option}」` }
+      if (!w.checked) w.click()
+      await waitFor(() => w.checked, { timeout: 400, step: 40 })
+      return { ok: true, result: `「${option}」已勾选` }
+    }
     const checkedNow = () => wraps.filter(w => w.querySelector('.ant-checkbox-checked')).length
     if (option === 'check' || option === 'uncheck') {
       const want = option === 'check'
@@ -236,6 +327,14 @@ async function uploadFile (ref) {
     return { ok: false, result: '无法写入 file input：' + (e?.message || e) }
   }
   input.dispatchEvent(new Event('change', { bubbles: true }))
+  // 非 Ant 上传组件（原生 input[type=file]）：塞入即成功，无列表 UI 可等
+  if (!r.item.querySelector('.ant-upload')) {
+    await sleep(150)
+    const nf = input.files?.length || 0
+    return nf > 0
+      ? { ok: true, result: `已向「${labelOf(r.item) || ref}」塞入 ${nf} 个文件（原生上传控件，无列表 UI；可 get_form 复核）` }
+      : { ok: false, result: '文件未能写入 input.files，需人工处理。' }
+  }
   // 等上传项出现且上传结束（上传中带 .ant-upload-list-item-uploading）：快则早退，慢则最多 12s
   await waitFor(() => {
     const items = [...r.item.querySelectorAll('.ant-upload-list-item')]
@@ -255,8 +354,8 @@ async function clickElement (ref) {
   if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止点击页面元素（防误提交），请调用 finish 结束。' }
   const el = r.item.matches('button') ? r.item : (r.item.querySelector('button') || r.item)
   const label = (r.item.textContent || '').trim()
-  // 「住所自動入力」等按钮会异步查邮编带出地址：轮询等表单值变化，有变化立即返回
-  if (/住所|自動入力|検索|search/i.test(label)) {
+  // 「住所自動入力 / 自动带入地址 / 邮编搜索」等异步按钮：轮询等表单值变化，有变化立即返回
+  if (/住所|自動入力|自动|邮编|郵便|検索|search|lookup/i.test(label)) {
     const scope = scopeEl()
     const before = [...scope.querySelectorAll('input')].map(i => i.value)
     el.click()
@@ -265,42 +364,56 @@ async function clickElement (ref) {
       return now.length !== before.length || now.some((v, i) => v !== before[i])
     }, { timeout: 3000, step: 100 })
     await sleep(150)
-    return { ok: true, result: `已点击「${label || ref}」${changed ? '，已检测到表单值带出' : '（3 秒内未检测到值变化）'}；请 get_form 复核地址汉字+カナ` }
+    return { ok: true, result: `已点击「${label || ref}」${changed ? '，已检测到表单值带出' : '（3 秒内未检测到值变化）'}；请 get_form 复核自动带出的值` }
   }
   el.click()
   await sleep(250)
-  return { ok: true, result: `已点击 ${ref}（如为「住所自動入力」，请 get_form 复核地址是否带出汉字+カナ）` }
+  return { ok: true, result: `已点击「${label || ref}」（请 get_form 复核效果）` }
 }
 
 async function readOptions (ref, query = '') {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
   if (r.kind === 'radio') {
-    return { ok: true, result: { options: [...r.item.querySelectorAll('.ant-radio-wrapper')].map(w => w.textContent.trim()) } }
+    return { ok: true, result: { options: radioOptionsOf(r.item) } }
   }
   if (r.kind === 'checkbox') {
-    return { ok: true, result: { options: [...r.item.querySelectorAll('.ant-checkbox-wrapper')].map(w => w.textContent.trim()) } }
+    return { ok: true, result: { options: checkboxOptionsOf(r.item) } }
   }
   if (r.kind !== 'select') return { ok: false, result: `字段类型 ${r.kind} 没有可读选项` }
+  // 原生 select：options 静态可读（get_form 已带，这里按需全量/过滤）
+  if (!r.item.querySelector('.ant-select')) {
+    const sel = r.item.matches('select') ? r.item : r.item.querySelector('select')
+    if (!sel) return { ok: false, result: '该字段没有可用 select' }
+    let opts = [...sel.options].map(o => (o.textContent || o.value || '').trim()).filter(Boolean)
+    const keyword = String(query || '').trim()
+    if (keyword) opts = opts.filter(t => t.includes(keyword))
+    return { ok: true, result: { count: opts.length, options: opts.slice(0, 60), ...(keyword ? { query: keyword } : {}) } }
+  }
   return withSelectLock(async () => {
     await openSelect(r.item)
     const keyword = String(query || '').trim()
+    let input = null
     if (keyword) {
       // EsSearchSelect 银行/支店等远程分页下拉：在下拉搜索框键入关键词再读
-      const input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
+      input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
       if (!input) {
         await closeSelect(r.item)
         return { ok: false, result: `下拉「${labelOf(r.item)}」没有可用搜索框，无法搜索「${keyword}」` }
       }
+      input.focus()
+      input.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
       setNativeValue(input, keyword)
       await sleep(700) // EsSearchSelect 远程搜索 debounce 500ms + 接口耗时
-      await waitFor(() => {
-        const dd = dropdownEl(r.item)
-        const vis = dd || anyOpenDropdown()
-        return !!vis && optionsReady(vis)
-      }, { timeout: 3000, step: 80 })
+      await waitFor(() => optionState(activeDropdown(r.item)) === 'usable', { timeout: 3000, step: 80 })
     }
-    const opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
+    let opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
+    // 查询无结果：清空搜索框回退读全量（该字段可能不是远程搜索，而是打开即全量加载）
+    if (keyword && opts.length === 0 && input) {
+      setNativeValue(input, '')
+      await sleep(500)
+      opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
+    }
     await closeSelect(r.item)
     const res = { count: opts.length, options: opts.slice(0, 60) }
     if (keyword) res.query = keyword
@@ -308,16 +421,19 @@ async function readOptions (ref, query = '') {
   })
 }
 
-// 仅设值并触发 input（不连带 change/blur，避免过早关闭面板）
-function setInputValue (input, s) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
-  setter.call(input, s)
-  input.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
 async function setDate (ref, y, m, d) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  // 原生 date input：直接设 YYYY-MM-DD
+  const native = r.item.querySelector('input[type="date"]') || (r.item.matches?.('input[type="date"]') ? r.item : null)
+  if (native) {
+    const v = `${y}-${pad2(m)}-${pad2(d)}`
+    setNativeValue(native, v)
+    await sleep(100)
+    return native.value === v
+      ? { ok: true, result: `已设日期「${labelOf(r.item) || r.ref || ''}」= ${native.value}` }
+      : { ok: false, result: `日期未生效（目标 ${v}，当前「${native.value || '空'}」）` }
+  }
   const input = r.item.querySelector('.ant-picker-input input')
   if (!input) return { ok: false, result: '该字段不是日期选择器' }
   const norm = s => String(s || '').replace(/[^0-9]/g, '')
@@ -345,39 +461,55 @@ async function setDate (ref, y, m, d) {
   return { ok: false, result: `日期可能未生效（目标 ${y}/${pad2(m)}/${pad2(d)}，当前框内「${got || '空'}」）。该选择器或不可键入；先 get_form 复核，若多次仍失败请在 finish 里标注此字段需人工。` }
 }
 
-async function clickButton (target) {
+// 找导航按钮：elepay 专属区优先，通用兜底（按文案/类型/样式评分，排除最终提交词）
+function findNavButton (kind) {
   const action = document.querySelector('.merchant-apply-info__action')
-  if (!action) return { ok: false, result: '未找到操作按钮区' }
+  if (action) {
+    const b = kind === 'back' ? action.querySelector('button.ant-btn-default') : action.querySelector('button.ant-btn-primary')
+    if (b && !b.disabled) return b
+    return null
+  }
+  const scope = scopeEl()
+  const btns = [...scope.querySelectorAll('button, input[type="submit"]'), ...document.querySelectorAll('button[type="submit"], input[type="submit"]')]
+    .filter(b => visible(b) && !b.disabled)
+  const text = b => (b.textContent || b.value || '').trim()
+  if (kind === 'back') {
+    return btns.find(b => /^(戻る|戻|前へ|前|back|prev)/i.test(text(b))) || null
+  }
+  // next：像「推进本步」的按钮（显式下一步文案 > submit 类型 > primary 样式），排除最终提交词
+  const nextish = b => /次へ|次の|次|next|進む|続ける|continue|step/i.test(text(b)) || b.type === 'submit' || /primary|main/i.test(b.className)
+  const score = b => (/次へ|次|next|進む|continue/i.test(text(b)) ? 3 : 0) + (b.type === 'submit' ? 2 : 0) + (/primary|main/i.test(b.className) ? 1 : 0)
+  const cand = btns.filter(b => nextish(b) && !SUBMIT_WORDS.test(text(b)))
+  return cand.length ? cand.sort((a, b) => score(b) - score(a))[0] : null
+}
+
+async function clickButton (target) {
   if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止提交/前进，请调用 finish 结束。' }
-
-  // 轮询等步骤切换（标题/确认页状态变化），有变化早退，比固定 sleep 快
-  const before = {
-    title: (document.querySelector('.merchant-apply-info__title')?.textContent || '').trim(),
-    confirm: isConfirm(),
+  const btn = findNavButton(target === 'back' ? 'back' : 'next')
+  if (!btn) {
+    return { ok: false, result: target === 'back'
+      ? '未找到可用的「返回」按钮（可能已在第一步）'
+      : '未找到「下一步」类按钮（可能当前不是多步表单，或必填项未填完被禁用；单页表单填完即可 finish）' }
   }
-  const waitStepChange = () => waitFor(() => {
-    const title = (document.querySelector('.merchant-apply-info__title')?.textContent || '').trim()
-    return title !== before.title || isConfirm() !== before.confirm
+  const label = (btn.textContent || btn.value || '').trim()
+  // 安全红线：最终提交类按钮绝不点击（双保险，确认页之外也要拦）
+  if (target !== 'back' && SUBMIT_WORDS.test(label)) {
+    return { ok: false, result: `「${label}」疑似最终提交按钮，已硬拦截（安全红线：绝不提交）。若确是中间步骤按钮，请用 finish 说明留人工。` }
+  }
+
+  // 轮询等步骤/表单变化（标题/确认页/控件数量/所有值签名），有变化早退
+  const allInputs = () => [...document.querySelectorAll('input, select, textarea')]
+  const before = { t: stepTitle(), c: isConfirm(), n: allInputs().length, sig: allInputs().map(e => e.value).join('§') }
+  btn.click()
+  const changed = await waitFor(() => {
+    const now = { t: stepTitle(), c: isConfirm(), n: allInputs().length, sig: allInputs().map(e => e.value).join('§') }
+    return now.t !== before.t || now.c !== before.c || now.n !== before.n || now.sig !== before.sig
   }, { timeout: 1500, step: 80 })
-
-  if (target === 'back') {
-    const b = action.querySelector('button.ant-btn-default')
-    if (!b || b.disabled) return { ok: false, result: '未找到可用的「返回」按钮（可能已在第一步）' }
-    b.click()
-    await waitStepChange()
-    await sleep(150)
-    return { ok: true, result: '已返回上一步（请 get_form 查看）' }
-  }
-  // next
-  const b = action.querySelector('button.ant-btn-primary')
-  if (!b) return { ok: false, result: '未找到「下一步」按钮' }
-  if (b.disabled) return { ok: false, result: '「下一步」按钮被禁用：可能有未填必填项或未勾选的项。' }
-  b.click()
-  const changed = await waitStepChange()
-  await sleep(200) // 等新步骤渲染
-  const err = document.querySelector('.ant-form-item-explain-error')
-  if (err) return { ok: true, result: `已点下一步，但出现校验错误：${err.textContent.trim()}（请 get_form 复核并修正）` }
-  return { ok: true, result: changed ? '已进入下一步（请 get_form 查看新步骤）' : '已点下一步（未检测到步骤变化，可能校验未过，请 get_form 复核）' }
+  // 等新步骤渲染出表单控件（早退），替代固定 sleep
+  await waitFor(() => !!document.querySelector('.ant-form-item, form, input, select, textarea'), { timeout: 800, step: 60 })
+  const err = document.querySelector('.ant-form-item-explain-error, .invalid-feedback, [class*="form-error"], [class*="invalid"]')
+  if (err) return { ok: true, result: `已点「${label}」，但出现校验错误：${(err.textContent || '').trim()}（请 get_form 复核并修正）` }
+  return { ok: true, result: changed ? `已点「${label}」（请 get_form 查看新状态）` : `已点「${label}」（未检测到步骤变化，可能校验未过，请 get_form 复核）` }
 }
 
 // 工具分发：background 下发的 agent:exec 按名字路由到这里

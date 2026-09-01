@@ -14,7 +14,7 @@ function fn (name, description, properties, required) {
 
 export const TOOLS = [
   fn('get_form',
-    '读取当前步骤的表单快照：步骤标题、是否为最终确认页(isConfirmStep)、所有可见字段(含 ref/类型/标签/当前值/校验错误)、以及可点按钮。每进入新步骤或做完改动后都应重新调用以拿到最新 ref。',
+    '读取当前步骤的表单快照+页面截图：步骤标题、是否为最终确认页(isConfirmStep)、所有可见字段(含 ref/类型/标签/当前值/校验错误)、以及可点按钮。结果附带页面截图（多模态）——下拉是否弹出、选项列表、错误提示、上传卡片状态都以截图为准。每进入新步骤或做完改动后都应重新调用以拿到最新 ref。',
     {}),
   fn('read_options',
     '打开某个下拉(select)，返回真实可选项。用于业种/利用シーン/支付方式/计划/银行/支店等「接口动态返回」的字段——这些选项无法凭空知道，必须先读再选。可选 query 会先在该下拉自己的搜索框输入关键词（银行/支店等远程分页下拉必用，如「三菱」「渋谷」）。',
@@ -28,8 +28,8 @@ export const TOOLS = [
     { ref: { type: 'string' }, value: { type: 'string' } },
     ['ref', 'value']),
   fn('choose_option',
-    '为 select/radio/checkbox 选一项。select/radio 传 option=标签文本或 value；select 传 option="first" 可直接选第一个可用项（必填校验只要求非空时的最快路径，不确定选什么就用它）；checkbox 传 option="check" 或 "uncheck"(同意条款一律 check)。需要特定选项时先 read_options。',
-    { ref: { type: 'string' }, option: { type: 'string', description: '标签文本/value，或 check/uncheck' } },
+    '为 select/radio/checkbox 选一项。select/radio 传 option=标签文本或 value；select 传 option="random" 随机选一个可用项（测试场景推荐，避免每次都选同一个），option="first" 选第一个；checkbox 传 option="check" 或 "uncheck"(同意条款一律 check)。需要特定选项时先 read_options。',
+    { ref: { type: 'string' }, option: { type: 'string', description: '标签文本/value，或 random/first，或 check/uncheck' } },
     ['ref', 'option']),
   fn('set_date',
     '为日期选择器设置年月日(如生年月日、オープン予定日、設立日)。',
@@ -44,7 +44,7 @@ export const TOOLS = [
     { ref: { type: 'string' } },
     ['ref']),
   fn('click_button',
-    '点击导航按钮。target="next" 下一步、"back" 上一步。安全：最终确认页禁止前进/提交，到确认页请改用 finish。',
+    '点击导航按钮。target="next" 下一步、"back" 上一步。安全：最终确认页禁止前进/提交；「最终提交」类按钮（申込/送信/登録/Submit 等）会被硬拦截，到确认页或单页表单填完请改用 finish。',
     { target: { type: 'string', enum: ['next', 'back'] } },
     ['target']),
   fn('finish',

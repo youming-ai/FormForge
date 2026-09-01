@@ -1,33 +1,27 @@
 {
   "manifest_version": 3,
-  "name": "加盟店申请表单 AI Agent 自动填充",
-  "version": "0.2.0",
-  "description": "浏览器内 agent（本地推理服务驱动）：识别并逐步填写 elepay-business 加盟店申请表单，读真实下拉选项、自我纠错、走到确认页停下（页面右下角浮窗控制）。仅供测试。",
+  "name": "表单自动填充 Agent",
+  "version": "0.4.0",
+  "description": "本地 AI 自动填写任意网页表单，到确认页停下、绝不提交。仅供测试。",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage"],
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
   "host_permissions": [
-    "http://10.0.0.64:8434/*",
-    "http://10.0.0.64:8800/*",
-    "http://100.96.69.27:8434/*",
-    "http://localhost:1234/*",
-    "http://127.0.0.1:1234/*",
-    "https://business.elepay.io/*",
-    "https://business.sandbox-elepay.com/*",
-    "https://stg-business.stg.elepay.dev/*",
-    "https://*.sterasmartone.com/*",
-    "http://localhost:7082/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "src/background/index.js",
     "type": "module"
   },
   "action": {
-    "default_title": "加盟店申请 AI Agent（点击切换页面浮窗）",
+    "default_title": "表单自动填充 Agent（点击切换浮窗）",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -38,11 +32,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://business.elepay.io/*",
-        "https://business.sandbox-elepay.com/*",
-        "https://stg-business.stg.elepay.dev/*",
-        "https://*.sterasmartone.com/*",
-        "http://localhost:7082/*"
+        "<all_urls>"
       ],
       "js": [
         "src/content/utils.js",

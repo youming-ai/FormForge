@@ -1,6 +1,6 @@
-# 加盟店申请表单 AI Agent（浏览器内 · 本地 LM Studio）
+# 通用表单自动填充 AI Agent（浏览器内 · 本地推理）
 
-一个**纯浏览器内**的 agent：在加盟店申请表单页面注入右下角浮窗，点「开始」后，**本地 LM Studio 的模型**通过 DOM 工具**逐步识别并填写**表单——读真实下拉选项、按校验纠错、一路点到**最终确认页停下（绝不提交）**。
+一个**纯浏览器内**的通用 agent：点扩展图标在任意页面唤出浮窗，**本地推理服务的多模态模型**通过 DOM 工具 + **页面截图识图**逐步识别并填写**任何网页表单**——读真实下拉选项、按校验纠错、一路点到**最终确认页停下（绝不提交）**。
 
 大脑是你自己的 LM Studio（OpenAI 兼容 + function calling），不走任何云端。与 `../elepay-apply-autofill-ext`（缓存注入，一次性填好）互补：那个最快、最稳；**这个智能**——能处理动态接口字段、自适应表单、看到报错自己改。
 
@@ -16,15 +16,15 @@
                          content 执行 DOM 操作 ──tool 结果──▶ 回循环
 ```
 
-- **大脑**：`background.js` 跑 OpenAI 兼容的 function-calling 循环，直连本地 LM Studio。
-- **手**：`content.js` 就在页面上执行 DOM 工具。
-- **眼**：`get_form` / `read_options` 把当前步骤和真实下拉选项喂回模型。
+- **大脑**：`src/background/index.js` 跑 OpenAI 兼容的 function-calling 循环，直连本地 LM Studio。
+- **手**：`src/content/dom-tools.js` 就在页面上执行 DOM 工具。
+- **眼**：`src/content/snapshot.js` 的 `get_form` / `read_options` 把当前步骤和真实下拉选项喂回模型。
 
 ## 工具集
 
 | 工具 | 作用 |
 |---|---|
-| `get_form` | 读当前步骤快照（字段 ref/类型/值/校验错误 + 按钮 + 是否确认页） |
+| `get_form` | 读当前步骤快照 + **页面截图**（多模态识图：下拉/选项/错误以截图为准） |
 | `read_options` | **打开下拉读真实选项**（业种/银行/支店/plan 等动态字段的关键） |
 | `fill_text` | 填文本/多行 |
 | `choose_option` | 选 select/radio/checkbox（同意条款 = check） |
@@ -59,7 +59,7 @@
 ```
 manifest.json          MV3 配置（推理服务主机 + 表单域名）
 src/background/       service worker（ES module）
-  index.js            入口：工具调用循环 + 消息路由（同一批 tool_calls 并行下发）
+  index.js            入口：工具调用循环 + 消息路由（同批 tool_calls 并行下发；get_form 附截图多模态）
   llm.js              推理服务客户端（设置/超时/cache_prompt/auto 模型解析）
   tools.js            工具定义（OpenAI function 格式）
   system-prompt.js    agent 指令 + 字段/枚举/日语格式指南

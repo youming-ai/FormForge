@@ -14,19 +14,37 @@ async function waitFor (cond, { timeout = 1500, step = 50 } = {}) {
   return cond()
 }
 
-function setNativeValue (el, value) {
+// 设值核心：用原生 value setter 绕过框架的受控组件拦截，再派发 input（可选 change）
+function setValue (el, value, { change = false } = {}) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
   const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
   if (setter) setter.call(el, value)
   else el.value = value
   el.dispatchEvent(new Event('input', { bubbles: true }))
-  el.dispatchEvent(new Event('change', { bubbles: true }))
+  if (change) el.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+// 设值并触发 input + change（通用）
+function setNativeValue (el, value) {
+  setValue(el, value, { change: true })
+}
+
+// 仅设值并触发 input（不连带 change/blur，避免过早关闭面板，如日期选择器）
+function setInputValue (el, value) {
+  setValue(el, value)
 }
 
 const visible = el => !!el && el.offsetParent !== null
 
 // 从 localStorage 里的 JWT(ACCESS_TOKEN, es-banana 缓存)解出当前登录用户邮箱
 function detectUserEmail () {
+  // base64url → UTF-8 字符串（TextDecoder 替代已弃用的 escape/unescape）
+  const b64UrlDecode = s => {
+    const b64 = s.replace(/-/g, '+').replace(/_/g, '/')
+    const bin = atob(b64)
+    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  }
   try {
     for (const k of Object.keys(localStorage)) {
       if (!/ACCESS_TOKEN$/.test(k)) continue
@@ -35,7 +53,7 @@ function detectUserEmail () {
       const parts = String(raw).split('.')
       if (parts.length < 2) continue
       try {
-        const payload = JSON.parse(decodeURIComponent(escape(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')))))
+        const payload = JSON.parse(b64UrlDecode(parts[1]))
         const email = payload.email || payload.mail || payload.preferred_username || payload.username
         if (email && /@/.test(email)) return String(email)
       } catch (_) { /* 解码失败跳过 */ }
