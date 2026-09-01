@@ -260,6 +260,14 @@ function buildSnapshot () {
     actions.push({ ref, label })
   })
 
+  // 按页面视觉顺序（文档序）重排字段，保证模型从上到下逐个处理
+  fields.sort((a, b) => {
+    const ea = REFS.find(r => r.ref === a.ref)?.item
+    const eb = REFS.find(r => r.ref === b.ref)?.item
+    if (!ea || !eb) return 0
+    return ea.compareDocumentPosition(eb) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  })
+
   const missingRequired = fields
     .filter(f => f.required && !String(f.value || '').trim())
     .map(f => `${f.ref}:${f.label || '(无标签)'}`)

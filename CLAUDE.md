@@ -29,13 +29,13 @@
 - **カナ字段**：label 带「（カナ）」只接受全角片假名，填汉字报「カタカナと数字で入力してください」。
 - **料金プラン**：自定义可点卡片 `.plan-select__plan`（选中加 `.active`），非标准 Ant 控件 → 单独识别为 `kind:'cards'`，choose_option 点匹配卡片。
 - **日期选择器**：`a-date-picker`，格式 **`YYYY/MM/DD`（斜杠）**。set_date 走 开面板→键入完整日期→Enter→blur→回读校验（连字符作回退）。
-- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 默认 `choose_option(ref,"random")`（random=从可用项随机选，避免每次同一值；`first` 仍兼容）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动下拉（カテゴリ→詳細）必须分轮选**，不能同批并行。
+- **动态下拉**（業種/シーン/支付方式/plan/银行/支店、地址 es-search-select）：选项接口返回，模型猜不到 → 默认 `choose_option(ref,"first")` 选第一个可用项（校验通常只要求非空，最稳最快）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动下拉（カテゴリ→詳細）必须分轮选**，不能同批并行。
 - **文件上传** `.ant-upload`：隐藏 `input[type=file]`，用 `DataTransfer` 塞 File + dispatch `change` 触发 rc-upload（真传 OSS）。`upload_file` 默认 canvas 生成 dummy PNG，或面板固定图（dataURL）。只收 PDF 等的字段会失败。
 - **checkbox**：点 `input.ant-checkbox-input`；点后 sleep 复读状态防「读到旧状态→再点→翻转」的反复勾选。
 
 ## Agent 行为约束（system-prompt.js）
 
-只处理两类字段：① `missingRequired`（必填且空）；② 带 `error` 的。其余 `filled=true` 且无 error 一律跳过（表单可能缓存预填/上轮已填）。同一字段连续失败 2 次就记进 finish summary 留人工，**绝不无限循环**。
+字段快照按**页面视觉顺序**排列（buildSnapshot 末尾按文档序 sort，混合 Ant/原生也正确），prompt 要求模型**严格按序逐个填**（默认一轮 1~3 个字段，校验联动时禁止并行）。只处理两类字段：① `missingRequired`（必填且空）；② 带 `error` 的。其余 `filled=true` 且无 error 一律跳过（表单可能缓存预填/上轮已填）。同一字段连续失败 2 次就记进 finish summary 留人工，**绝不无限循环**。
 
 **测试数据策略**：① 所有加盟店名称（会社名/屋号/店名 + kana/romaji）必须带「テスト」标识。② 邮箱字段用「当前用户邮箱 + 加号别名」`local+<tag>@domain`——base 邮箱**不写死人名**：content `detectUserEmail()` 从 localStorage 的 JWT(`*ACCESS_TOKEN`)解 email，面板「基础邮箱」可覆盖，onStart 随 `agent:start` 传给 background → buildSystemPrompt({baseEmail})。**加号 tag 由 agent 按本次申请上下文自起**（如店名罗马字），便于识别邮件归属，不固定。base 邮箱缺失时 prompt 让 agent 用 `test+<tag>@example.com` 占位并在 finish 提示人工。
 
