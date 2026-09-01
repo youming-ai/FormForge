@@ -117,7 +117,10 @@ async function chooseOption (ref, option) {
     if (!r.item.querySelector('.ant-select')) {
       const sel = r.item.matches('select') ? r.item : r.item.querySelector('select')
       if (!sel) return { ok: false, result: '该字段没有可用 select' }
-      const opts = [...sel.options].filter(o => (o.textContent || o.value || '').trim()).map(o => ({ o, t: (o.textContent || o.value).trim() }))
+      // first/random 跳过空值占位项（選択してください），避免选中占位造成假填充
+      const all = [...sel.options].filter(o => (o.textContent || o.value || '').trim())
+      const real = all.filter(o => o.value !== '')
+      const opts = (real.length ? real : all).map(o => ({ o, t: (o.textContent || o.value).trim() }))
       if (!opts.length) return { ok: false, result: '该下拉没有可选项' }
       const want = String(option ?? '').trim()
       const hit = /^(random|随机|任意)$/i.test(want) ? opts[Math.floor(Math.random() * opts.length)]
@@ -385,7 +388,9 @@ async function readOptions (ref, query = '') {
   if (!r.item.querySelector('.ant-select')) {
     const sel = r.item.matches('select') ? r.item : r.item.querySelector('select')
     if (!sel) return { ok: false, result: '该字段没有可用 select' }
-    let opts = [...sel.options].map(o => (o.textContent || o.value || '').trim()).filter(Boolean)
+    const all = [...sel.options].map(o => (o.textContent || o.value || '').trim()).filter(Boolean)
+    const real = [...sel.options].filter(o => o.value !== '').map(o => (o.textContent || '').trim()).filter(Boolean)
+    let opts = real.length ? real : all // 空值占位项滤掉
     const keyword = String(query || '').trim()
     if (keyword) opts = opts.filter(t => t.includes(keyword))
     return { ok: true, result: { count: opts.length, options: opts.slice(0, 60), ...(keyword ? { query: keyword } : {}) } }

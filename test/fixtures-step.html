@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: 非确认页（中间步骤）</title></head>
+<body>
+<h1>ステップ2</h1>
+<form>
+  <label for="c-zip">郵便番号</label>
+  <input id="c-zip" type="text" required>
+  <button type="button" id="btn-next-like">次へ</button>
+</form>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

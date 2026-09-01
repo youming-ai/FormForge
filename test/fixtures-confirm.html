@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: 确认页形态</title></head>
+<body>
+<h1>内容確認</h1>
+<!-- 无任何可编辑控件 + 最终提交按钮 → 通用确认页判定应成立 -->
+<table>
+  <tr><th>氏名</th><td>テスト山田太郎</td></tr>
+  <tr><th>メール</th><td>test@example.com</td></tr>
+</table>
+<button type="submit" id="btn-submit">申込む</button>
+<button type="button" id="btn-back">戻る</button>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

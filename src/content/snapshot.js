@@ -53,6 +53,9 @@ function classify (item) {
 }
 
 const labelOf = item => {
+  // fieldset 组：legend 是组标题（若直接取 label 会拿到第一个选项文本）
+  const legend = item.querySelector?.('legend')?.textContent
+  if (legend && legend.trim()) return legend.trim().replace(/\s+/g, ' ')
   // label 自身就是字段容器（原生 label 包 input）：取其文本但排除内嵌控件
   if (item.matches?.('label')) {
     const txt = [...item.childNodes]
@@ -90,7 +93,10 @@ function valueOf (item, kind) {
   if (kind === 'select') {
     const ant = item.querySelector('.ant-select-selection-item')
     if (ant) return (ant.getAttribute('title') || ant.textContent).trim()
-    return (item.querySelector('select')?.selectedOptions?.[0]?.textContent || '').trim()
+    // 原生 select：占位项（value=""，如「選択してください」）视为未填——浏览器会自动选中它，不能当已填
+    const nat = item.querySelector('select')
+    const opt = nat?.selectedOptions?.[0]
+    return opt && opt.value !== '' ? opt.textContent.trim() : ''
   }
   if (kind === 'radio') {
     const ant = item.querySelector('.ant-radio-wrapper-checked')
@@ -144,8 +150,13 @@ function nativeFieldUnits (scope, covered) {
   for (const el of els) {
     let box
     if (el.type === 'radio' || el.type === 'checkbox') {
-      const grp = el.closest('fieldset, [role="radiogroup"], [role="group"], ul, table')
-      if (grp && [...grp.querySelectorAll(`input[type="${el.type}"]`)].filter(i => i.name && i.name === el.name).length > 1) {
+      let grp = el.closest('fieldset, [role="radiogroup"], [role="group"], ul, table')
+      if (!grp) {
+        // 无显式组容器时用「最近 div」聚合：该 div 内同类控件 >1 才当组（独立包装 div 不会误组）
+        const div = el.closest('div')
+        if (div && [...div.querySelectorAll(`input[type="${el.type}"]`)].filter(i => visible(i) && !i.disabled).length > 1) grp = div
+      }
+      if (grp && [...grp.querySelectorAll(`input[type="${el.type}"]`)].filter(i => !i.disabled).length > 1) {
         box = grp
       } else box = el.closest('label') || el.parentElement
     } else {
@@ -215,9 +226,12 @@ function buildSnapshot () {
     if (err) f.error = err
     if (kind === 'radio' && !f.filled) f.options = radioOptionsOf(box)
     if (kind === 'checkbox') f.options = checkboxOptionsOf(box)
-    // 原生 select 的选项静态可读，直接带上（Ant select 的选项是动态的，需 read_options）
+    // 原生 select 的选项静态可读，直接带上（Ant select 的选项是动态的，需 read_options）；
+    // 空值占位项（value="" 的「選択してください」）滤掉，避免 first 选中占位造成假填充
     if (kind === 'select' && !f.filled) {
-      f.options = [...(box.querySelector('select')?.options || [])].map(o => (o.textContent || '').trim()).filter(Boolean).slice(0, 60)
+      const all = [...(box.querySelector('select')?.options || [])]
+      const real = all.filter(o => o.value !== '')
+      f.options = (real.length ? real : all).map(o => (o.textContent || '').trim()).filter(Boolean).slice(0, 60)
     }
     fields.push(f)
   }
