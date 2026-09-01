@@ -36,18 +36,9 @@ export async function resolveModel (settings) {
   return 'local-model'
 }
 
-export async function callLLM ({ endpoint, model, messages, tools, signal }) {
+export async function callLLM ({ endpoint, model, messages, tools }) {
   const ctrl = new AbortController()
   let timedOut = false
-  let callerAborted = false
-  const onAbort = () => {
-    callerAborted = true
-    ctrl.abort()
-  }
-  if (signal) {
-    if (signal.aborted) onAbort()
-    else signal.addEventListener('abort', onAbort, { once: true })
-  }
   const timer = setTimeout(() => { timedOut = true; ctrl.abort() }, LLM_TIMEOUT_MS)
   let resp
   try {
@@ -68,11 +59,9 @@ export async function callLLM ({ endpoint, model, messages, tools, signal }) {
     })
   } catch (err) {
     if (timedOut) throw new Error(`推理服务响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：可能正在冷加载模型或队列拥堵，请重试`)
-    if (callerAborted || signal?.aborted) throw new Error('模型请求已取消')
     throw new Error(`连不上推理服务 (${endpoint})：${err?.message || err}。确认 llama-server/llama-swap 或 LM Studio 已启动并可从本机访问。`)
   } finally {
     clearTimeout(timer)
-    signal?.removeEventListener('abort', onAbort)
   }
   if (!resp.ok) {
     const t = await resp.text().catch(() => '')

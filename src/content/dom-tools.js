@@ -2,12 +2,6 @@
 // 注：同一轮的多个工具调用会被 background 并行执行，select 类操作用互斥锁排队，避免多个下拉互相开合干扰
 
 const optText = o => (o.getAttribute('title') || o.textContent || '').trim()
-const usableOption = o =>
-  o.getAttribute('aria-disabled') !== 'true' &&
-  !o.classList.contains('ant-select-item-option-disabled') &&
-  !o.classList.contains('es-options-item-tips')
-const optionsReady = root =>
-  [...root.querySelectorAll('.ant-select-item-option')].some(usableOption) || !!root.querySelector('.ant-empty')
 
 // 定位该字段专属的下拉浮层（aria-owns / aria-controls），避免读到其它字段的下拉；取不到则退回全局
 function dropdownEl (item) {
@@ -36,13 +30,11 @@ async function openSelect (item) {
   selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   selector?.click()
   // 等下拉浮层出现且渲染出选项（动态接口选项可能异步到达），出现即早退
-  const timeout = item.querySelector('.es-search-select') ? 4000 : 1000
   await waitFor(() => {
     const dd = dropdownEl(item)
-    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && optionsReady(dd)
-    const visibleDropdown = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-    return !!visibleDropdown && optionsReady(visibleDropdown)
-  }, { timeout, step: 50 })
+    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && !!dd.querySelector('.ant-select-item-option, .ant-empty')
+    return !!document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+  }, { timeout: 1000, step: 50 })
 }
 async function closeSelect (item) {
   const input = item.querySelector('input')
@@ -68,37 +60,28 @@ async function fillText (ref, value) {
   }
   const input = r.item.querySelector('textarea, input')
   if (!input) return { ok: false, result: '该字段不是文本框' }
-  setNativeValue(input, value) // 已含 input+change 事件
-  // es-input-currency / a-input-number：额外发 blur 触发 antd-vue InputNumber 的失焦归一化与校验
-  if (input.closest('.ant-input-number')) {
-    input.dispatchEvent(new Event('blur', { bubbles: true }))
-  }
+  setNativeValue(input, value)
   await sleep(30)
-  const got = input.value || ''
-  return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}${got && got !== value ? `（控件已归一化为 ${got}）` : ''}` }
+  return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
 }
 
 async function chooseOption (ref, option) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
-  if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止修改选项，请调用 finish 结束。' }
 
   if (r.kind === 'select') {
     return withSelectLock(async () => {
       await openSelect(r.item)
-      const opts = optionsOf(r.item).filter(usableOption)
+      const opts = optionsOf(r.item)
       let target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
       if (!target) {
         const list = opts.slice(0, 20).map(optText).join(' / ')
         await closeSelect(r.item)
         return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级)'}` }
       }
-      const wanted = optText(target)
       target.click()
-      const selected = await waitFor(() => [...r.item.querySelectorAll('.ant-select-selection-item')]
-        .some(el => optText(el) === wanted), { timeout: 700, step: 50 })
-      if (!selected) return { ok: false, result: `点击选项「${wanted}」后未检测到选中状态，请 get_form 复核` }
-      return { ok: true, result: `已选「${labelOf(r.item)}」= ${wanted}` }
+      await waitFor(() => !!r.item.querySelector('.ant-select-selection-item'), { timeout: 500, step: 50 })
+      return { ok: true, result: `已选「${labelOf(r.item)}」= ${optText(target)}` }
     })
   }
 
@@ -134,13 +117,13 @@ async function chooseOption (ref, option) {
   }
 
   if (r.kind === 'cards') {
-    const cards = planCardsOf(r.item)
-    const card = cards.find(c => planTitleOf(c) === option) || cards.find(c => planTitleOf(c).includes(option))
-    if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(planTitleOf).join(' / ')}` }
+    const cards = [...r.item.querySelectorAll('.plan-select__plan')]
+    const titleOf = c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim()
+    const card = cards.find(c => titleOf(c) === option) || cards.find(c => titleOf(c).includes(option))
+    if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(titleOf).join(' / ')}` }
     card.click()
-    const selected = await waitFor(() => planIsActive(card), { timeout: 500, step: 50 })
-    if (!selected) return { ok: false, result: `卡片「${planTitleOf(card)}」点击后未显示已选状态，请 get_form 复核` }
-    return { ok: true, result: `已选卡片「${planTitleOf(card)}」` }
+    await waitFor(() => card.classList.contains('active'), { timeout: 500, step: 50 })
+    return { ok: true, result: `已选卡片「${titleOf(card)}」` }
   }
 
   return { ok: false, result: `字段类型 ${r.kind} 不支持 choose_option` }
@@ -177,10 +160,6 @@ async function makeUploadFile () {
   return makeDummyPng()
 }
 
-// 上传列表项计数：legacy FileUploader 用自定义 itemRender（.file-downloader-item），
-// 标准 a-upload 才有 .ant-upload-list-item，两者都兼容
-const uploadItemsOf = item => [...item.querySelectorAll('.ant-upload-list-item, .file-downloader-item')]
-
 // 向 Ant Upload 字段塞文件并触发上传（默认 dummy 图 / 面板固定图）
 async function uploadFile (ref) {
   const r = getRef(ref)
@@ -189,7 +168,7 @@ async function uploadFile (ref) {
   if (!input) return { ok: false, result: '该字段不是上传组件（找不到 file input）' }
   let file
   try { file = await makeUploadFile() } catch (e) { return { ok: false, result: '生成上传文件失败：' + (e?.message || e) } }
-  const n0 = uploadItemsOf(r.item).length
+  const n0 = r.item.querySelectorAll('.ant-upload-list-item').length
   try {
     const dt = new DataTransfer()
     dt.items.add(file)
@@ -199,15 +178,14 @@ async function uploadFile (ref) {
   }
   input.dispatchEvent(new Event('change', { bubbles: true }))
   // 等上传项出现且上传结束（上传中带 .ant-upload-list-item-uploading）：快则早退，慢则最多 12s
-  // FileUploader 的真实上传走 fileApi.upload（OSS），列表项上传成功后才出现
   await waitFor(() => {
-    const items = uploadItemsOf(r.item)
+    const items = [...r.item.querySelectorAll('.ant-upload-list-item')]
     return items.length > n0 && items.every(it => !it.classList.contains('ant-upload-list-item-uploading'))
   }, { timeout: 12000, step: 120 })
-  const n = uploadItemsOf(r.item).length
+  const n = r.item.querySelectorAll('.ant-upload-list-item').length
   const err = r.item.querySelector('.ant-upload-list-item-error')
   if (err) return { ok: false, result: `上传可能失败（列表项标红）。该字段或只接受特定类型(如 PDF)，需人工。` }
-  if (n <= n0) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝，如类型/数量/大小限制），需人工处理。' }
+  if (n <= n0) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝），需人工处理。' }
   return { ok: true, result: `已上传「${file.name}」，当前列表 ${n} 个文件；稍后可 get_form 复核。` }
 }
 
@@ -235,7 +213,7 @@ async function clickElement (ref) {
   return { ok: true, result: `已点击 ${ref}（如为「住所自動入力」，请 get_form 复核地址是否带出汉字+カナ）` }
 }
 
-async function readOptions (ref, query = '') {
+async function readOptions (ref) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
   if (r.kind === 'radio') {
@@ -247,25 +225,9 @@ async function readOptions (ref, query = '') {
   if (r.kind !== 'select') return { ok: false, result: `字段类型 ${r.kind} 没有可读选项` }
   return withSelectLock(async () => {
     await openSelect(r.item)
-    const keyword = String(query || '').trim()
-    if (keyword) {
-      const input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
-      if (!input) {
-        await closeSelect(r.item)
-        return { ok: false, result: `下拉「${labelOf(r.item)}」没有可用搜索框，无法搜索「${keyword}」` }
-      }
-      setInputValue(input, keyword)
-      // EsSearchSelect 的远程搜索有 500ms debounce；静态 options 则会更快更新。
-      await sleep(520)
-      await waitFor(() => {
-        const dd = dropdownEl(r.item)
-        const visibleDropdown = dd || document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-        return !!visibleDropdown && optionsReady(visibleDropdown)
-      }, { timeout: 2500, step: 60 })
-    }
-    const opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
+    const opts = optionsOf(r.item).map(optText).filter(Boolean)
     await closeSelect(r.item)
-    return { ok: true, result: { count: opts.length, options: opts.slice(0, 60), ...(keyword ? { query: keyword } : {}) } }
+    return { ok: true, result: { count: opts.length, options: opts.slice(0, 60) } }
   })
 }
 
@@ -345,7 +307,7 @@ async function clickButton (target) {
 async function execTool (name, input) {
   switch (name) {
     case 'get_form': return { ok: true, result: buildSnapshot() }
-    case 'read_options': return readOptions(input.ref, input.query)
+    case 'read_options': return readOptions(input.ref)
     case 'fill_text': return fillText(input.ref, input.value)
     case 'choose_option': return chooseOption(input.ref, input.option)
     case 'set_date': return setDate(input.ref, input.year, input.month, input.day)
