@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS = {
   // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
   endpoint: 'http://10.0.0.64:8800/v1/chat/completions',
   // 需支持 function calling；llama-swap 会按需 JIT 换入未加载的模型（首次有冷加载延迟）
-  model: 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M',
+  model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
