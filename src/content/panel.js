@@ -10,141 +10,105 @@ function createPanel () {
   const root = host.attachShadow({ mode: 'open' })
   root.innerHTML = `
     <style>
-      :host {
-        all: initial;
-        --panel: rgba(255,255,255,.97); --panel-solid:#fff; --surface:#f6f8fc; --surface-2:#eef2f8;
-        --text:#172033; --muted:#68758b; --line:#dfe5ef; --brand:#3b5bdb; --brand-2:#7048e8;
-        --brand-soft:#edf2ff; --success:#099268; --danger:#e03131; --warning:#e67700;
-        --shadow: 0 24px 64px rgba(22,32,51,.20), 0 4px 16px rgba(22,32,51,.10);
-      }
+      :host { all: initial; }
       * { box-sizing:border-box; }
       button, input, textarea { font:inherit; }
-      button { -webkit-tap-highlight-color:transparent; }
       .card {
-        width:min(382px, calc(100vw - 28px)); color:var(--text); background:var(--panel);
-        border:1px solid rgba(207,216,230,.92); border-radius:18px; box-shadow:var(--shadow);
-        overflow:hidden; font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Hiragino Kaku Gothic ProN",sans-serif;
-        backdrop-filter:blur(18px) saturate(140%); -webkit-backdrop-filter:blur(18px) saturate(140%);
-        animation:panel-in .22s cubic-bezier(.2,.8,.2,1);
+        width:min(340px, calc(100vw - 24px)); color:#111827; background:#fff;
+        border:1px solid #e5e7eb; border-radius:8px; box-shadow:0 8px 28px rgba(0,0,0,.08);
+        overflow:hidden; font:13px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans",sans-serif;
+        animation:panel-in .18s ease-out;
       }
-      @keyframes panel-in { from { opacity:0; transform:translateY(10px) scale(.98); } }
-      .hd {
-        min-height:68px; display:flex; align-items:center; justify-content:space-between; gap:12px;
-        padding:13px 14px 12px 15px; color:#fff;
-        background:linear-gradient(125deg, #263b80 0%, var(--brand) 48%, var(--brand-2) 100%);
-        position:relative; overflow:hidden;
-      }
-      .hd::after { content:""; position:absolute; width:150px; height:150px; right:-52px; top:-95px;
-        border-radius:50%; background:rgba(255,255,255,.13); pointer-events:none; }
-      .brand { display:flex; align-items:center; gap:11px; min-width:0; position:relative; z-index:1; }
-      .logo { width:39px; height:39px; flex:0 0 auto; display:grid; place-items:center; border-radius:12px;
-        background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.22); box-shadow:inset 0 1px rgba(255,255,255,.18); }
-      .logo svg { width:24px; height:24px; }
-      .brand-copy { min-width:0; }
-      .title { font-size:14px; line-height:1.2; font-weight:750; letter-spacing:.01em; white-space:nowrap; }
-      .subtitle { display:flex; align-items:center; gap:6px; margin-top:5px; color:rgba(255,255,255,.78); font-size:11px; }
-      .state-dot { width:7px; height:7px; border-radius:50%; background:#b7c0d1; box-shadow:0 0 0 3px rgba(255,255,255,.10); }
-      .card.running .state-dot { background:#69db7c; animation:pulse 1.5s infinite; }
-      @keyframes pulse { 50% { box-shadow:0 0 0 5px rgba(105,219,124,.12); } }
-      .collapse { width:32px; height:32px; padding:0; display:grid; place-items:center; flex:0 0 auto; position:relative; z-index:1;
-        cursor:pointer; color:#fff; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.18); border-radius:10px; }
-      .collapse:hover { background:rgba(255,255,255,.22); }
-      .collapse svg { width:16px; transition:transform .2s ease; }
-      .card.collapsed .collapse svg { transform:rotate(180deg); }
-      .bd { max-height:calc(100vh - 104px); padding:15px; overflow:auto; scrollbar-width:thin; scrollbar-color:#c8d0df transparent; }
+      @keyframes panel-in { from { opacity:0; transform:translateY(6px); } }
+      .hd { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px;
+        border-bottom:1px solid #f0f1f3; }
+      .hd-left { min-width:0; }
+      .title { font-size:13px; font-weight:600; white-space:nowrap; }
+      .subtitle { display:flex; align-items:center; gap:6px; margin-top:3px; color:#9ca3af; font-size:11px; }
+      .state-dot { width:6px; height:6px; border-radius:50%; background:#d1d5db; }
+      .card.running .state-dot { background:#10b981; }
+      .collapse { border:0; background:none; padding:2px 4px; cursor:pointer; color:#9ca3af; font-size:14px; line-height:1; }
+      .collapse:hover { color:#111827; }
+      .bd { max-height:calc(100vh - 80px); padding:14px; overflow:auto; scrollbar-width:thin; scrollbar-color:#e5e7eb transparent; }
       .bd.hidden { display:none; }
-      .section-label { display:flex; align-items:center; justify-content:space-between; margin-bottom:7px; color:var(--text); font-size:12px; font-weight:700; }
-      .optional { color:var(--muted); font-size:10px; font-weight:500; }
-      textarea, input[type="text"] { width:100%; color:var(--text); background:var(--panel-solid); border:1px solid var(--line); border-radius:10px;
-        padding:9px 10px; outline:none; transition:border-color .15s, box-shadow .15s, background .15s; }
-      textarea { min-height:67px; resize:vertical; line-height:1.5; }
-      textarea::placeholder, input::placeholder { color:#9aa5b7; }
-      textarea:hover, input[type="text"]:hover { border-color:#bec8d9; }
-      textarea:focus, input[type="text"]:focus { border-color:var(--brand); box-shadow:0 0 0 3px rgba(59,91,219,.12); }
-      .warn { display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding:9px 10px; color:#8f4b00; background:#fff8e8;
-        border:1px solid #ffe0a6; border-radius:10px; font-size:11px; }
+      .section-label { display:flex; justify-content:space-between; margin-bottom:6px; color:#6b7280; font-size:11px; }
+      .optional { color:#c4c9d1; }
+      textarea, input[type="text"] { width:100%; color:#111827; background:#fff; border:1px solid #e5e7eb; border-radius:6px;
+        padding:8px 9px; outline:none; transition:border-color .12s; }
+      textarea { min-height:56px; resize:vertical; line-height:1.5; }
+      textarea::placeholder, input::placeholder { color:#c4c9d1; }
+      textarea:hover, input[type="text"]:hover { border-color:#d1d5db; }
+      textarea:focus, input[type="text"]:focus { border-color:#111827; }
+      .warn { margin-top:10px; padding:7px 9px; color:#92600a; background:#fffdf5; border:1px solid #f3ead2;
+        border-radius:6px; font-size:11px; line-height:1.5; }
       .warn[hidden] { display:none; }
-      .warn svg { width:16px; flex:0 0 auto; margin-top:1px; color:var(--warning); }
-      .actions { display:grid; grid-template-columns:minmax(0, 1fr) 96px; gap:8px; margin-top:12px; }
-      .btn { min-height:38px; display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:8px 12px;
-        border-radius:10px; border:1px solid transparent; cursor:pointer; font-size:12px; font-weight:700; transition:transform .12s, box-shadow .15s, background .15s, border-color .15s; }
-      .btn:active:not(:disabled) { transform:translateY(1px); }
-      .btn:focus-visible, .collapse:focus-visible, summary:focus-visible, .mini:focus-visible { outline:3px solid rgba(59,91,219,.25); outline-offset:2px; }
-      .btn svg { width:15px; height:15px; }
-      .pri { color:#fff; background:linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow:0 6px 14px rgba(59,91,219,.24); }
-      .pri:hover:not(:disabled) { box-shadow:0 8px 18px rgba(59,91,219,.30); }
-      .gho { color:var(--text); background:var(--panel-solid); border-color:var(--line); }
-      .gho:hover:not(:disabled) { background:var(--surface); border-color:#c7d0df; }
-      .btn:disabled { cursor:not-allowed; opacity:.48; box-shadow:none; }
-      .statusbar { display:flex; align-items:center; gap:8px; min-height:32px; margin-top:9px; padding:7px 9px;
-        color:var(--muted); background:var(--surface); border:1px solid #edf0f5; border-radius:9px; font-size:11px; }
-      .status-icon { width:18px; height:18px; display:grid; place-items:center; color:var(--brand); background:var(--brand-soft); border-radius:6px; }
-      .status-icon svg { width:11px; }
+      .actions { display:grid; grid-template-columns:minmax(0,1fr) 72px; gap:8px; margin-top:12px; }
+      .btn { min-height:34px; border-radius:6px; border:1px solid transparent; cursor:pointer;
+        font-size:12.5px; font-weight:500; transition:background .12s, border-color .12s, opacity .12s; }
+      .pri { color:#fff; background:#111827; }
+      .pri:hover:not(:disabled) { background:#000; }
+      .gho { color:#111827; background:#fff; border-color:#e5e7eb; }
+      .gho:hover:not(:disabled) { border-color:#d1d5db; }
+      .btn:disabled { cursor:not-allowed; opacity:.4; }
+      .statusbar { display:flex; align-items:center; gap:6px; margin-top:10px; color:#9ca3af; font-size:11px; min-height:15px; }
+      .status-icon { width:6px; height:6px; border-radius:50%; background:#d1d5db; flex:0 0 auto; }
       .status { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-      details { margin-top:11px; border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--panel-solid); }
-      summary { list-style:none; display:flex; align-items:center; gap:8px; padding:10px 11px; cursor:pointer; color:var(--text); font-size:12px; font-weight:700; user-select:none; }
+      details { margin-top:12px; }
+      summary { list-style:none; display:flex; align-items:center; gap:6px; padding:4px 0; cursor:pointer;
+        color:#6b7280; font-size:11.5px; user-select:none; }
       summary::-webkit-details-marker { display:none; }
-      summary:hover { background:var(--surface); }
-      summary .gear { width:17px; color:var(--muted); }
-      summary .chev { width:14px; margin-left:auto; color:var(--muted); transition:transform .18s; }
-      details[open] summary { border-bottom:1px solid var(--line); }
+      summary:hover { color:#111827; }
+      summary .chev { width:9px; color:#c4c9d1; transition:transform .15s; }
       details[open] .chev { transform:rotate(180deg); }
-      .settings-body { padding:4px 11px 12px; background:linear-gradient(180deg, var(--surface) 0, var(--panel-solid) 28px); }
-      label.fl { display:block; margin:10px 0 5px; color:var(--text); font-size:11px; font-weight:700; }
-      .hint { display:block; margin-top:3px; color:var(--muted); font-size:10px; line-height:1.4; font-weight:400; }
-      .file { width:100%; color:var(--muted); font-size:10px; }
-      .file::file-selector-button { margin-right:8px; padding:6px 9px; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:8px; cursor:pointer; }
-      .upload-name { margin-top:5px; color:var(--success); font-size:10px; word-break:break-all; }
-      .setting-actions { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:11px; }
-      .setting-actions .btn { min-height:33px; padding:6px 11px; }
-      .remove { color:var(--danger); background:transparent; border-color:transparent; }
-      .remove:hover:not(:disabled) { background:#fff0f0; }
-      .log-card { margin-top:11px; border:1px solid var(--line); border-radius:11px; overflow:hidden; background:var(--surface); }
-      .log-hd { display:flex; align-items:center; justify-content:space-between; padding:8px 10px; color:var(--muted); border-bottom:1px solid var(--line); font-size:10px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; }
-      .mini { padding:3px 6px; color:var(--muted); background:transparent; border:0; border-radius:6px; cursor:pointer; font-size:10px; text-transform:none; letter-spacing:0; }
-      .mini:hover { color:var(--text); background:var(--surface-2); }
-      .log { min-height:74px; max-height:220px; overflow:auto; padding:8px 9px; color:var(--muted);
-        font:10.5px/1.55 "SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; white-space:pre-wrap; word-break:break-word; scrollbar-width:thin; }
-      .log:empty::before { content:"Agent 的操作记录会显示在这里"; display:grid; min-height:56px; place-items:center; color:#9aa5b7; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-      .log .l { padding:2px 0; }
-      .c-assistant { color:var(--text); }
-      .c-tool { color:var(--brand); font-weight:650; }
-      .c-result { color:var(--muted); }
-      .c-result.err, .c-error { color:var(--danger); font-weight:700; }
-      .c-status { color:#74829a; }
-      .c-perf { color:#7c5cba; }
-      .c-done { color:var(--success); font-weight:700; }
-      .footnote { display:flex; align-items:center; justify-content:center; gap:5px; margin-top:9px; color:#98a3b5; font-size:9px; }
-      .footnote svg { width:10px; }
+      .settings-body { padding:6px 0 2px; }
+      label.fl { display:block; margin:10px 0 4px; color:#6b7280; font-size:11px; }
+      .hint { display:block; margin-top:2px; color:#c4c9d1; font-size:10px; font-weight:400; }
+      .file { width:100%; color:#9ca3af; font-size:10.5px; }
+      .file::file-selector-button { margin-right:8px; padding:5px 8px; color:#111827; background:#fff;
+        border:1px solid #e5e7eb; border-radius:5px; cursor:pointer; font-size:10.5px; }
+      .upload-name { margin-top:4px; color:#059669; font-size:10.5px; word-break:break-all; }
+      .setting-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+      .setting-actions .btn { min-height:30px; padding:5px 12px; font-size:12px; }
+      .remove { color:#dc2626; background:transparent; border-color:transparent; }
+      .remove:hover:not(:disabled) { border-color:#fecaca; }
+      .log-hd { display:flex; align-items:center; justify-content:space-between; margin-top:14px; padding-top:12px;
+        border-top:1px solid #f0f1f3; color:#9ca3af; font-size:10.5px; }
+      .mini { padding:0 2px; color:#c4c9d1; background:none; border:0; cursor:pointer; font-size:10.5px; }
+      .mini:hover { color:#111827; }
+      .log { min-height:60px; max-height:220px; overflow:auto; margin-top:6px; color:#6b7280;
+        font:10.5px/1.6 "SFMono-Regular",Consolas,Menlo,monospace; white-space:pre-wrap; word-break:break-word; scrollbar-width:thin; }
+      .log:empty::before { content:"日志"; display:block; color:#e0e2e6; }
+      .log .l { padding:1.5px 0; }
+      .c-assistant { color:#111827; }
+      .c-tool { color:#2563eb; }
+      .c-result { color:#9ca3af; }
+      .c-result.err, .c-error { color:#dc2626; }
+      .c-status { color:#c4c9d1; }
+      .c-perf { color:#c4c9d1; }
+      .c-done { color:#059669; }
+      .footnote { margin-top:12px; color:#c4c9d1; font-size:10px; text-align:center; }
       [hidden] { display:none !important; }
-      @media (prefers-reduced-motion:reduce) { .card { animation:none; } .state-dot { animation:none !important; } * { scroll-behavior:auto !important; } }
-      @media (prefers-color-scheme:dark) {
-        :host { --panel:rgba(23,29,41,.97); --panel-solid:#171d29; --surface:#202838; --surface-2:#293348; --text:#edf1f7;
-          --muted:#a7b1c2; --line:#354056; --brand-soft:#27345f; --shadow:0 24px 70px rgba(0,0,0,.45); }
-        .card { border-color:#39445a; } textarea::placeholder, input::placeholder { color:#78859a; }
-        .warn { color:#ffd8a8; background:#392d1d; border-color:#65491e; }
-        .remove:hover:not(:disabled) { background:#3b2227; }
-      }
+      @media (prefers-reduced-motion:reduce) { .card { animation:none; } }
     </style>
     <div class="card" id="card">
       <header class="hd">
-        <div class="brand">
-          <div class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 4.5h7l3 3V19a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 6 19V6a1.5 1.5 0 0 1 1-1.5Z" stroke="currentColor" stroke-width="1.7"/><path d="M14 4.8V8h3.1M8.8 11h5.8M8.8 14h4.3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="m9 17 1.2 1.2 2.4-2.5" stroke="#8ce99a" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-          <div class="brand-copy"><div class="title">加盟店申请 · AI Agent</div><div class="subtitle"><span class="state-dot" id="statedot"></span><span id="headstatus">准备就绪</span></div></div>
+        <div class="hd-left">
+          <div class="title">加盟店申请 · AI Agent</div>
+          <div class="subtitle"><span class="state-dot" id="statedot"></span><span id="headstatus">准备就绪</span></div>
         </div>
-        <button class="collapse" id="collapse" type="button" title="折叠面板" aria-label="折叠面板" aria-expanded="true"><svg viewBox="0 0 20 20" fill="none"><path d="m5 8 5 5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="collapse" id="collapse" type="button" title="折叠面板" aria-label="折叠面板" aria-expanded="true">▾</button>
       </header>
       <div class="bd" id="body">
         <label class="section-label" for="scenario"><span>申请场景</span><span class="optional">选填</span></label>
         <textarea id="scenario" rows="2" placeholder="例如：东京个人事业主经营的拉面店"></textarea>
-        <div class="warn" id="prodwarn" hidden><svg viewBox="0 0 20 20" fill="none"><path d="M10 2.5 18 17H2L10 2.5Z" stroke="currentColor" stroke-width="1.6"/><path d="M10 7v4.5M10 14.3v.2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span>生产环境：Agent 到确认页会停下、不会提交；请勿手动提交测试数据。</span></div>
+        <div class="warn" id="prodwarn" hidden>生产环境：Agent 到确认页会停下、不会提交；请勿手动提交测试数据。</div>
         <div class="actions">
-          <button class="btn pri" id="start" type="button"><svg viewBox="0 0 20 20" fill="none"><path d="m7 5 7 5-7 5V5Z" fill="currentColor"/></svg>开始自动填写</button>
-          <button class="btn gho" id="stop" type="button" disabled><svg viewBox="0 0 20 20" fill="none"><rect x="5.5" y="5.5" width="9" height="9" rx="2" fill="currentColor"/></svg>停止</button>
+          <button class="btn pri" id="start" type="button">开始自动填写</button>
+          <button class="btn gho" id="stop" type="button" disabled>停止</button>
         </div>
-        <div class="statusbar"><span class="status-icon"><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v4M8 4.8v.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><span class="status" id="status">准备就绪</span></div>
+        <div class="statusbar"><span class="status-icon" id="statusdot"></span><span class="status" id="status">准备就绪</span></div>
         <details id="settings">
-          <summary><svg class="gear" viewBox="0 0 20 20" fill="none"><path d="M8.4 2.7h3.2l.5 2a6 6 0 0 1 1.2.7l2-.6 1.6 2.8-1.5 1.4a6 6 0 0 1 0 1.4l1.5 1.4-1.6 2.8-2-.6a6 6 0 0 1-1.2.7l-.5 2H8.4l-.5-2a6 6 0 0 1-1.2-.7l-2 .6-1.6-2.8 1.5-1.4a6 6 0 0 1 0-1.4L3.1 7.6l1.6-2.8 2 .6a6 6 0 0 1 1.2-.7l.5-2Z" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="9.7" r="2.2" stroke="currentColor" stroke-width="1.4"/></svg>连接与高级设置<svg class="chev" viewBox="0 0 16 16" fill="none"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></summary>
+          <summary>连接与高级设置<svg class="chev" viewBox="0 0 16 16" fill="none"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></summary>
           <div class="settings-body">
             <label class="fl" for="endpoint">推理服务地址<span class="hint">OpenAI 兼容的 /v1/chat/completions</span></label>
             <input id="endpoint" type="text" spellcheck="false" placeholder="http://10.0.0.64:8800/v1/chat/completions" />
@@ -154,12 +118,13 @@ function createPanel () {
             <input id="baseemail" type="text" inputmode="email" placeholder="自动探测或手动填写" />
             <label class="fl" for="uploadimg">固定测试图片<span class="hint">可选，最大 4MB；默认使用自动生成的测试图</span></label>
             <input class="file" id="uploadimg" type="file" accept="image/*" />
-            <div class="upload-name" id="uploadimgname"></div>
-            <div class="setting-actions"><button class="btn remove" id="rmimg" type="button" hidden>移除图片</button><span></span><button class="btn gho" id="savecfg" type="button">保存设置</button></div>
+            <div class="upload-name" id="uploadimgname" style="margin-top:4px;color:#059669;font-size:10.5px;word-break:break-all;"></div>
+            <div class="setting-actions"><button class="btn remove" id="rmimg" type="button" hidden>移除图片</button><span style="flex:1"></span><button class="btn gho" id="savecfg" type="button">保存</button></div>
           </div>
         </details>
-        <div class="log-card"><div class="log-hd"><span>运行日志</span><button class="mini" id="clearlog" type="button">清空</button></div><div class="log" id="log" aria-live="polite"></div></div>
-        <div class="footnote"><svg viewBox="0 0 16 16" fill="none"><path d="M8 1.8 13 4v3.5c0 3.2-2.1 5.5-5 6.7-2.9-1.2-5-3.5-5-6.7V4l5-2.2Z" stroke="currentColor" stroke-width="1.3"/><path d="m5.8 8 1.4 1.4 3-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>确认页自动停止 · 不会提交申请</div>
+        <div class="log-hd"><span>运行日志</span><button class="mini" id="clearlog" type="button">清空</button></div>
+        <div class="log" id="log" aria-live="polite"></div>
+        <div class="footnote">确认页自动停止 · 不会提交申请</div>
       </div>
     </div>`
   ;(document.documentElement || document.body).appendChild(host)
