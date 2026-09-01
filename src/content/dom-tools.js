@@ -2,6 +2,13 @@
 // 注：同一轮的多个工具调用会被 background 并行执行，select 类操作用互斥锁排队，避免多个下拉互相开合干扰
 
 const optText = o => (o.getAttribute('title') || o.textContent || '').trim()
+// 可用选项 = 非禁用、非搜索提示项（es-options-item-tips 是「输入关键词搜索」提示，不是选项）
+const usableOption = o =>
+  o.getAttribute('aria-disabled') !== 'true' &&
+  !o.classList.contains('ant-select-item-option-disabled') &&
+  !o.classList.contains('es-options-item-tips')
+const optionsReady = root =>
+  [...root.querySelectorAll('.ant-select-item-option')].some(usableOption) || !!root.querySelector('.ant-empty')
 
 // 定位该字段专属的下拉浮层（aria-owns / aria-controls），避免读到其它字段的下拉；取不到则退回全局
 function dropdownEl (item) {
@@ -29,12 +36,14 @@ async function openSelect (item) {
   const selector = item.querySelector('.ant-select-selector') || item.querySelector('.ant-select')
   selector?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
   selector?.click()
-  // 等下拉浮层出现且渲染出选项（动态接口选项可能异步到达），出现即早退
+  // 等下拉浮层出现且渲染出「可用」选项（动态接口选项可能异步到达）；搜索型下拉给 4s
+  const timeout = item.querySelector('.es-search-select') ? 4000 : 1400
   await waitFor(() => {
     const dd = dropdownEl(item)
-    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && !!dd.querySelector('.ant-select-item-option, .ant-empty')
-    return !!document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
-  }, { timeout: 1000, step: 50 })
+    if (dd) return !dd.classList.contains('ant-select-dropdown-hidden') && optionsReady(dd)
+    const visibleDropdown = document.querySelector('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')
+    return !!visibleDropdown && optionsReady(visibleDropdown)
+  }, { timeout, step: 50 })
 }
 async function closeSelect (item) {
   const input = item.querySelector('input')
@@ -72,16 +81,19 @@ async function chooseOption (ref, option) {
   if (r.kind === 'select') {
     return withSelectLock(async () => {
       await openSelect(r.item)
-      const opts = optionsOf(r.item)
+      const opts = optionsOf(r.item).filter(usableOption)
       let target = opts.find(o => optText(o) === option) || opts.find(o => optText(o).includes(option))
       if (!target) {
         const list = opts.slice(0, 20).map(optText).join(' / ')
         await closeSelect(r.item)
         return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级)'}` }
       }
+      const wanted = optText(target)
       target.click()
-      await waitFor(() => !!r.item.querySelector('.ant-select-selection-item'), { timeout: 500, step: 50 })
-      return { ok: true, result: `已选「${labelOf(r.item)}」= ${optText(target)}` }
+      const selected = await waitFor(() => [...r.item.querySelectorAll('.ant-select-selection-item')]
+        .some(el => optText(el) === wanted), { timeout: 700, step: 50 })
+      if (!selected) return { ok: false, result: `点击选项「${wanted}」后未检测到选中状态，请 get_form 复核` }
+      return { ok: true, result: `已选「${labelOf(r.item)}」= ${wanted}` }
     })
   }
 
@@ -225,7 +237,7 @@ async function readOptions (ref) {
   if (r.kind !== 'select') return { ok: false, result: `字段类型 ${r.kind} 没有可读选项` }
   return withSelectLock(async () => {
     await openSelect(r.item)
-    const opts = optionsOf(r.item).map(optText).filter(Boolean)
+    const opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)
     await closeSelect(r.item)
     return { ok: true, result: { count: opts.length, options: opts.slice(0, 60) } }
   })
