@@ -91,7 +91,18 @@ async function chooseOption (ref, option) {
 
   if (r.kind === 'select') {
     return withSelectLock(async () => {
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      const norm = t => String(t || '').replace(/\s+/g, '')
+      const selectedText = () => [...r.item.querySelectorAll('.ant-select-selection-item')].map(el => optText(el))
+      const pressKey = (key) => {
+        const input = r.item.querySelector('.ant-select-selection-search-input, .ant-select input')
+        input?.focus?.()
+        const kc = { Enter: 13, ArrowDown: 40 }[key] || 0
+        for (const type of ['keydown', 'keyup']) {
+          (input || document.activeElement)?.dispatchEvent(new KeyboardEvent(type, { key, code: key, keyCode: kc, which: kc, bubbles: true, cancelable: true }))
+        }
+      }
+      // 三段式：鼠标点击（真实序列）→ 回车（rc-select 打开后默认激活第一项）→ 方向键下移+回车
+      for (let attempt = 1; attempt <= 3; attempt++) {
         await openSelect(r.item)
         const opts = optionsOf(r.item).filter(usableOption)
         // option="first"：直接选第一个可用项（校验只要求必填的场景最快路径）
@@ -104,20 +115,32 @@ async function chooseOption (ref, option) {
           return { ok: false, result: `未找到选项「${option}」。当前可选：${list || '(空，可能是联动下拉需先选上级；或远程分页下拉，请用 read_options 传 query 搜索关键词)'}` }
         }
         const wanted = optText(target)
-        // 完整鼠标序列（rc-select 部分路径依赖 mousedown）
-        try { target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* ignore */ }
-        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
-        target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
-        target.click()
-        const selected = await waitFor(() => [...r.item.querySelectorAll('.ant-select-selection-item')]
-          .some(el => optText(el) === wanted), { timeout: 700, step: 50 })
-        if (selected) return { ok: true, result: `已选「${labelOf(r.item)}」= ${wanted}` }
+
+        if (attempt === 1) {
+          try { target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })) } catch { /* ignore */ }
+          target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+          target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+          target.click()
+        } else if (attempt === 2) {
+          pressKey('Enter')
+        } else {
+          pressKey('ArrowDown')
+          await sleep(120)
+          pressKey('Enter')
+        }
+        // 回读校验（whitespace 归一化，避免全角空格导致的假失败）
+        const selected = await waitFor(() => selectedText().some(t => norm(t) === norm(wanted) || norm(t).includes(norm(wanted))), { timeout: 700, step: 50 })
+        if (selected) {
+          const got = selectedText()[0] || wanted
+          return { ok: true, result: `已选「${labelOf(r.item)}」= ${got}${attempt > 1 ? `（${attempt === 2 ? '回车' : '方向键+回车'}兜底路径）` : ''}` }
+        }
         await closeSelect(r.item)
         await sleep(150)
       }
       const dd = dropdownEl(r.item)
       const n = dd ? dd.querySelectorAll('.ant-select-item-option').length : 0
-      return { ok: false, result: `点击选项「${option}」重试 2 次均未生效（浮层内选项 DOM ${n} 个，下拉${anyOpenDropdown() ? '仍打开' : '已关闭'}）。请 get_form 复核实际值，或用 read_options 确认当前可选项` }
+      const cur = (r.item.querySelector('.ant-select-selection-item')?.textContent || '').trim()
+      return { ok: false, result: `选择「${option}」三段式（点击/回车/方向键+回车）均未验证通过（浮层选项 DOM ${n} 个，下拉${anyOpenDropdown() ? '仍打开' : '已关闭'}，当前框内值：${cur || '空'}）。请 get_form 复核实际值再决定` }
     })
   }
 
