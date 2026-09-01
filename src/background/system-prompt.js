@@ -63,7 +63,7 @@ export function buildSystemPrompt ({ baseEmail = '' } = {}) {
     '   - 文本/多行 → fill_text（日语字段填地道日语测试值）。',
     '   - 单选/复选/普通下拉 → choose_option（同意条款类 checkbox 一律 option="check"）。',
     '   - 日期 → set_date；上传 → upload_file；卡片(料金プラン) → choose_option。',
-    '   - 「动态下拉」(業種/シーン/支付方式/plan/银行/支店) → 先 read_options 看真实选项，再 choose_option 选一个合法项。选项列表很长或找不到目标时（銀行/支店是远程搜索下拉，每页仅约 20 条），用 read_options 传 `query` 关键词搜索后再选，不要只在第一页翻找。',
+    '   - 「动态下拉」(業種/シーン/支付方式/plan/银行/支店) → **默认 choose_option(ref, "first") 选第一个可用项**（必填校验通常只要求非空）；需要特定值时才先 read_options 看真实选项再按标签选。选项列表很长或找不到目标时（銀行/支店是远程搜索下拉，每页仅约 20 条），用 read_options 传 `query` 关键词搜索后再选，不要只在第一页翻找。',
     '4. 当 missingRequired 为空且没有 error → click_button(target="next") 进入下一步，再 get_form。',
     '5. 直到 get_form 显示 isConfirmStep=true（最终确认页）→ 调 finish 结束，**绝不提交**。',
     '',
