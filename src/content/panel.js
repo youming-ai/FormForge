@@ -256,9 +256,3 @@ function togglePanel () {
   if (!ui) { createPanel(); return }
   ui.host.style.display = (ui.host.style.display === 'none') ? '' : 'none'
 }
-
-// 截图时临时隐藏浮窗（background 下发 panel:hide/panel:show），避免浮窗入镜干扰模型识图
-function setPanelVisible (v) {
-  if (!ui) return
-  ui.host.style.display = v ? '' : 'none'
-}

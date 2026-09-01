@@ -3,10 +3,11 @@
 export const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加载大模型可能很慢，给足）
 
 export const DEFAULT_SETTINGS = {
-  // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling + 多模态识图）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
+  // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
   endpoint: 'http://10.0.0.64:8800/v1/chat/completions',
-  // 需支持 function calling + 图像输入（get_form 附页面截图）；llama-swap 未加载的模型按需 JIT 换入（首次有冷加载延迟）
-  model: 'unsloth/Qwen3.8-27B-GGUF:8-27B-Q4_K_M',
+  // 纯 DOM 方案不依赖多模态：选 MoE（30B 总参仅 3B 激活、已加载）——agent 多轮循环对每 token
+  // 速度敏感，比稠密 27B 快数倍，且 tool calling 已验证。填 auto 则自动选「已加载」的对话模型。
+  model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
@@ -20,29 +21,22 @@ export function parseArgs (tc) {
   try { return JSON.parse(tc.function?.arguments || '{}') } catch (_) { return {} }
 }
 
-/** 解析模型 → { id, image }。
- * image=true 表示该模型支持图像输入（llama.cpp /v1/models 的 architecture.input_modalities 含 image），
- * 决定 get_form 是否附带页面截图（纯文本模型收到 image_url 会报错）。
- * model='auto' 时优先选「已加载」的，排除 embedding/asr/rerank/whisper。 */
+/** 解析模型 → id 字符串。model='auto' 时调 /v1/models 优先选「已加载」的，
+ * 排除 embedding/asr/rerank/whisper（llama-swap 返回 status.loaded/unloaded）。 */
 export async function resolveModel (settings) {
   const modelsUrl = settings.endpoint.replace(/\/chat\/completions\/?$/, '/models')
   const wanted = (settings.model || '').trim()
+  if (wanted && wanted !== 'auto') return wanted
   try {
     const r = await fetch(modelsUrl)
     if (r.ok) {
       const j = await r.json()
-      const list = (j?.data || []).filter(x => x.id && !/embed|asr|rerank|whisper/i.test(x.id))
-      let entry
-      if (wanted && wanted !== 'auto') {
-        entry = list.find(x => x.id === wanted)
-        return { id: wanted, image: !!entry?.architecture?.input_modalities?.includes('image') }
-      }
-      entry = list.find(x => x.status?.value === 'loaded') || list[0]
-      if (entry) return { id: entry.id, image: !!entry.architecture?.input_modalities?.includes('image') }
+      const chat = (j?.data || []).filter(x => x.id && !/embed|asr|rerank|whisper/i.test(x.id))
+      const id = (chat.find(x => x.status?.value === 'loaded') || chat[0])?.id
+      if (id) return id
     }
   } catch (_) { /* 兜底 */ }
-  if (wanted && wanted !== 'auto') return { id: wanted, image: false } // 列表拿不到：保守按纯文本处理
-  return { id: 'local-model', image: false }
+  return 'local-model'
 }
 
 export async function callLLM ({ endpoint, model, messages, tools, signal }) {
@@ -66,7 +60,7 @@ export async function callLLM ({ endpoint, model, messages, tools, signal }) {
         tools,
         tool_choice: 'auto',
         temperature: 0.3,
-        max_tokens: 2000,
+        max_tokens: 1200, // 工具调用 JSON + 简短说明足够；收紧上限避免个别轮次拖长
         stream: false,
         cache_prompt: true, // llama.cpp / LM Studio：保留 KV prompt cache，多轮工具循环显著降低首 token 延迟
       }),

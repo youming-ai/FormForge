@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "表单自动填充 Agent",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "本地 AI 自动填写任意网页表单，到确认页停下、绝不提交。仅供测试。",
   "icons": {
     "16": "icons/icon16.png",
@@ -10,8 +10,7 @@
     "128": "icons/icon128.png"
   },
   "permissions": [
-    "storage",
-    "tabs"
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"

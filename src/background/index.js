@@ -31,35 +31,15 @@ function compressHistory (messages) {
     start = Math.max(1, lastAssistant)
   }
   const tail = messages.slice(start)
-  // 尾段里只保留最后一张页面截图，更早的剥掉图像只留文本（base64 截图非常占上下文）
-  let lastImg = -1
-  tail.forEach((m, i) => {
-    if (Array.isArray(m?.content) && m.content.some(c => c.type === 'image_url')) lastImg = i
-  })
-  const kept = lastImg === -1 ? tail : tail.map((m, i) => {
-    if (i === lastImg || !Array.isArray(m.content)) return m
-    const t = m.content.filter(c => c.type === 'text').map(c => c.text).join('\n')
-    return { ...m, content: t || '（此前的页面截图已省略）' }
-  })
   return [
     head,
     { role: 'system', content: '（较早的对话已压缩省略。以最近一次 get_form 返回的当前表单状态为准，不要依赖被省略的历史。）' },
-    ...kept,
+    ...tail,
   ]
 }
 
 function log (tabId, kind, text, extra) {
   chrome.tabs.sendMessage(tabId, { type: 'agent:log', kind, text, extra }).catch(() => {})
-}
-
-// 截取当前标签页可见区域（jpeg dataURL）。多模态识图用：get_form 结果附带截图，
-// 让模型直接「看」到自定义组件的真实渲染状态（下拉是否弹出、选项是什么、上传卡片长什么样）。
-async function captureTab (tabId) {
-  try {
-    return await chrome.tabs.captureVisibleTab(tabId, { format: 'jpeg', quality: 55 })
-  } catch (_) {
-    return null // 无 tabs 权限/浏览器内置页/截屏失败：退回纯文本快照
-  }
 }
 
 async function runAgent (tabId, scenario, baseEmail) {
@@ -72,7 +52,7 @@ async function runAgent (tabId, scenario, baseEmail) {
 
   try {
     const settings = await getSettings()
-    const { id: model, image: modelVision } = await resolveModel(settings)
+    const model = await resolveModel(settings)
     // 优先用 content 传来的(面板值 || 页面探测)，回退到已存设置
     const userEmail = (baseEmail || settings.baseEmail || '').trim()
 
@@ -84,7 +64,6 @@ async function runAgent (tabId, scenario, baseEmail) {
     log(tabId, 'status', `开始（模型 ${model}）`)
 
     let ended = null
-    let captureWarned = false // 截图失败只提示一次，避免刷屏
     for (let turn = 0; turn < MAX_TURNS; turn++) {
       if (aborted.has(tabId)) { log(tabId, 'status', '已被用户停止'); ended = 'abort'; break }
 
@@ -92,11 +71,7 @@ async function runAgent (tabId, scenario, baseEmail) {
       const m = choice.message || {}
       messages.push(m) // 原样追加 assistant 消息（含 tool_calls）
 
-      // assistant 文本打日志（content 可能是 string / null / 多模态数组，数组时取 text 部分防 [object Object]）
-      const assistantText = Array.isArray(m.content)
-        ? m.content.filter(c => c?.type === 'text').map(c => c.text).join('\n').trim()
-        : (m.content ? String(m.content).trim() : '')
-      if (assistantText) log(tabId, 'assistant', assistantText)
+      if (m.content && String(m.content).trim()) log(tabId, 'assistant', String(m.content).trim())
 
       const toolCalls = m.tool_calls || []
       if (!toolCalls.length) { log(tabId, 'done', '模型结束（无更多工具调用）'); ended = 'end'; break }
@@ -109,33 +84,15 @@ async function runAgent (tabId, scenario, baseEmail) {
       }
 
       // 先按序打日志，再执行同一批工具调用。
-      // 时序关键：get_form 必须第一个单独执行并【立刻截图】——若与其它修改页面的工具并行，
-      // 截图会混入改动后的状态（甚至开着下拉），导致「图与快照不一致」。
-      // get_form 是同步 buildSnapshot，非常快，先跑它不拖慢整体。
+      // get_form 单独先跑：快照反映「本批开始时」的状态，语义一致（同步 buildSnapshot，很快）。
       for (const tc of toolCalls) log(tabId, 'tool', `${tc.function?.name} ${briefInput(parseArgs(tc))}`)
 
       const execTc = tc => chrome.tabs.sendMessage(tabId, { type: 'agent:exec', name: tc.function?.name, input: parseArgs(tc) })
         .catch(err => ({ ok: false, result: `与页面通信失败：${err?.message || err}` }))
 
-      // get_form 单独先跑 + 立刻截图（此时页面未被本批其它工具改动，图与快照一致）
       const getFormIdx = toolCalls.findIndex(tc => tc.function?.name === 'get_form')
-      const wantShot = modelVision && getFormIdx !== -1
-      let shot = null
       let results = []
-      if (getFormIdx !== -1) {
-        results[getFormIdx] = await execTc(toolCalls[getFormIdx])
-        if (wantShot) {
-          // 截面前隐藏浮窗（防浮窗入镜干扰识图），截完恢复
-          chrome.tabs.sendMessage(tabId, { type: 'panel:hide' }).catch(() => {})
-          await sleep(120) // 等隐藏 + 重绘
-          shot = await captureTab(tabId)
-          chrome.tabs.sendMessage(tabId, { type: 'panel:show' }).catch(() => {})
-          if (!shot && !captureWarned) {
-            captureWarned = true
-            log(tabId, 'status', '页面截图不可用（权限/页面类型限制），本轮起仅用 DOM 快照 + 文本')
-          }
-        }
-      }
+      if (getFormIdx !== -1) results[getFormIdx] = await execTc(toolCalls[getFormIdx])
       // 其余工具并行执行：总耗时从「求和」变为「取最大」
       await Promise.all(toolCalls.map(async (tc, i) => {
         if (i === getFormIdx) return
@@ -147,19 +104,7 @@ async function runAgent (tabId, scenario, baseEmail) {
         const res = results[i]
         const text = toResultString(res?.result)
         log(tabId, 'result', text, { ok: res?.ok !== false })
-        if (tc.function?.name === 'get_form' && shot) {
-          // OpenAI 多模态格式：text + image_url（llama.cpp / LM Studio 均支持）
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: [
-              { type: 'text', text },
-              { type: 'image_url', image_url: { url: shot } },
-            ],
-          })
-        } else {
-          messages.push({ role: 'tool', tool_call_id: tc.id, content: text })
-        }
+        messages.push({ role: 'tool', tool_call_id: tc.id, content: text })
       }
       // 每轮末尾压缩历史，控制上下文长度
       messages = compressHistory(messages)

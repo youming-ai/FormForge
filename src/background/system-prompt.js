@@ -31,7 +31,7 @@ export function buildSystemPrompt ({ baseEmail = '' } = {}) {
     '',
     '## 工作循环',
     '1. 先调 get_form 看当前表单。每个字段带 filled(是否已填/已选)、required(是否必填)、error(校验错误)；顶层有 missingRequired(必填但空的字段)。',
-    '   - get_form 结果附带**页面截图**：结合截图与快照判断。下拉是否弹出、选项列表里有什么、错误提示在哪、上传卡片状态——**以截图里的真实渲染状态为准**（自定义组件的 DOM 快照可能读不到选项）。截图里看得到的选项可以直接 choose_option 按标签选。',
+    '   - 快照里只有 radio/checkbox/原生 select 会带 options；**自定义组件下拉（Ant select 等）的选项不在快照里**——用 read_options(ref) 打开下拉拿真实选项列表。快照读不到选项 ≠ 字段没数据。',
     '2. **只处理需要处理的字段，跳过已完成的**：',
     '   - 需要处理 = ① missingRequired 里的（必填且空）；② 任何带 error 的（校验失败，需修正）。',
     '   - 其余 filled=true 且无 error 的字段**一律跳过**：不要重填、重选、重新勾选（表单可能已预填，或上一轮已填好）。',
