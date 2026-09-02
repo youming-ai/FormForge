@@ -13,7 +13,7 @@
 
 ## 运行配置
 
-- 默认 endpoint `http://10.0.0.64:8800/v1/chat/completions`（macstudio **llama.cpp/llama-swap**，OpenAI 兼容 + function calling，已实测）。备选：LM Studio Tailscale `100.96.69.27:8434`（注意 LM Studio 的 8434 LAN 口 2025-xx 起不可达），本机 `localhost:1234`。
+- 默认 endpoint `http://10.0.0.64:8434/v1/chat/completions`（局域网 **LM Studio**，OpenAI 兼容 + function calling）。备选：macstudio llama.cpp/llama-swap `10.0.0.64:8800`、Tailscale `100.96.69.27:8434`、本机 `localhost:1234`。
 - 默认模型 `Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M`（llama.cpp MoE，30B 总参仅 **3B 激活**、已加载、tool calling 已验证）——多轮 agent 循环选 MoE 而非稠密 27B（如 Qwen3.8-27B，慢数倍）；填 `auto` 则调 `/v1/models` 自动选「已加载」的对话模型（排除 embed/asr/rerank）。
 - 设置存 `chrome.storage.local.agentSettings = {endpoint, model, baseEmail, uploadImage}`（permissions 仅 storage，无 tabs），面板可改（基础邮箱可清空恢复自动探测，固定图片可移除）。
 - 改 manifest `host_permissions` / `content_scripts.matches` 切环境（已含四个表单域名）。

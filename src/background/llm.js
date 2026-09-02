@@ -3,8 +3,8 @@
 export const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加载大模型可能很慢，给足）
 
 export const DEFAULT_SETTINGS = {
-  // macstudio llama.cpp / llama-swap（OpenAI 兼容 + function calling）。LM Studio 备选：Tailscale 100.96.69.27:8434，本机 localhost:1234
-  endpoint: 'http://10.0.0.64:8800/v1/chat/completions',
+  // 局域网 LM Studio（OpenAI 兼容 + function calling）。备选：macstudio llama.cpp/llama-swap 10.0.0.64:8800，Tailscale 100.96.69.27:8434，本机 localhost:1234
+  endpoint: 'http://10.0.0.64:8434/v1/chat/completions',
   // 纯 DOM 方案不依赖多模态：选 MoE（30B 总参仅 3B 激活、已加载）——agent 多轮循环对每 token
   // 速度敏感，比稠密 27B 快数倍，且 tool calling 已验证。填 auto 则自动选「已加载」的对话模型。
   model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',

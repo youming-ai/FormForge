@@ -112,7 +112,7 @@ function createPanel () {
           <summary>连接设置<span class="spacer"></span><span class="hint" id="savedtip"></span></summary>
           <div class="settings-body">
             <label class="fl" for="endpoint">推理服务地址<span class="hint">OpenAI 兼容的 /v1/chat/completions</span></label>
-            <input id="endpoint" type="text" spellcheck="false" placeholder="http://10.0.0.64:8800/v1/chat/completions" />
+            <input id="endpoint" type="text" spellcheck="false" placeholder="http://10.0.0.64:8434/v1/chat/completions" />
             <label class="fl" for="model">模型<span class="hint">auto = 优先选当前已加载模型；修改后自动保存</span></label>
             <input id="model" type="text" spellcheck="false" placeholder="Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M" />
             <label class="fl" for="baseemail">基础邮箱<span class="hint">留空自动探测；提交用安全的加号别名</span></label>
