@@ -114,7 +114,7 @@ function createPanel () {
             <label class="fl" for="endpoint">推理服务地址<span class="hint">OpenAI 兼容的 /v1/chat/completions</span></label>
             <input id="endpoint" type="text" spellcheck="false" placeholder="http://10.0.0.64:8434/v1/chat/completions" />
             <label class="fl" for="model">模型<span class="hint">auto = 优先选当前已加载模型；修改后自动保存</span></label>
-            <input id="model" type="text" spellcheck="false" placeholder="Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M" />
+            <input id="model" type="text" spellcheck="false" placeholder="qwen/qwen3-30b-a3b-2507" />
             <label class="fl" for="baseemail">基础邮箱<span class="hint">留空自动探测；提交用安全的加号别名</span></label>
             <input id="baseemail" type="text" inputmode="email" placeholder="自动探测或手动填写" />
             <label class="fl" for="uploadimg">固定测试图片<span class="hint">可选，最大 4MB；默认自动生成测试图</span></label>
