@@ -50,4 +50,4 @@ elepay：`business.elepay.io`(prod) / `business.sandbox-elepay.com` / `stg-busin
 - 下个最可能要调的点：复杂联动控件、日期 picker 若 readonly 需改「点面板日期格」、「住所自動入力」若 click 没触发异步查询需换触发方式。
 - **不要**引入 agent-sdk/打包构建（MV3 不能运行时 require，上 SDK 要 bundler，破坏即装即用；background 已按 ES module 拆分 `src/background/`，content 侧靠 manifest 多文件按序注入共享作用域，均零构建；工具循环本身才几十行）。
 - 字段/枚举/日语格式权威来源：elepay-business `ApplyForm/steps/*` 与姊妹工具 `../elepay-apply-autofill-ext/schema.js`。
-- 图标：`icons/make_icons.py` 程序化生成（白色圆角方块+黑色 # 号，代表表单/占位符），改设计改脚本重跑即可，无需素材文件。
+- 图标：白色圆角方块 + 黑色 {F}（FormForge 标识，取自 forgecode.dev logo 的图形部分、去除文字）；素材在 `icons/forge_mark.svg`（源）与 `icons/forge_mark_512.png`（Chrome 渲染的高清位图），`make_icons.py` 贴图生成各尺寸。
