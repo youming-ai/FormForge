@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS = {
   endpoint: 'http://10.0.0.64:8434/v1/chat/completions',
   // 纯 DOM 方案不依赖多模态：选 MoE（30B 总参仅 3B 激活、已加载）——agent 多轮循环对每 token
   // 速度敏感，比稠密 27B 快数倍，且 tool calling 已验证。填 auto 则自动选「已加载」的对话模型。
-  model: 'qwen/qwen3-30b-a3b-2507',
+  model: 'qwen3.6-35b-a3b-mlx',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
