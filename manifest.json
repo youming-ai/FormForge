@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "表单自动填充 Agent",
+  "name": "FormForge",
   "version": "0.4.1",
   "description": "本地 AI 自动填写任意网页表单，到确认页停下、绝不提交。仅供测试。",
   "icons": {
@@ -20,7 +20,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "表单自动填充 Agent（点击切换浮窗）",
+    "default_title": "FormForge（点击切换浮窗）",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",

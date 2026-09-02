@@ -93,7 +93,7 @@ function createPanel () {
     </style>
     <div class="card" id="card">
       <header class="hd">
-        <div class="title">表单自动填充</div>
+        <div class="title">FormForge</div>
         <div class="hd-right">
           <span class="state-dot" id="statedot"></span>
           <span class="headstatus" id="headstatus">就绪</span>
