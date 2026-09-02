@@ -1,5 +1,5 @@
-// tools.js —— 工具定义（OpenAI function-calling 格式，供 LM Studio /v1/chat/completions）
-// 执行端在 content.js，按 function.name 分发。
+// tools.js —— 工具定义（OpenAI function-calling 格式，供 llama.cpp / LM Studio /v1/chat/completions）
+// 执行端在 src/content/dom-tools.js 的 execTool，按 function.name 分发。
 
 function fn (name, description, properties, required) {
   return {

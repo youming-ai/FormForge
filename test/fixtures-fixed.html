@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: fixed 弹窗表单</title></head>
+<body>
+<!-- 模拟登录/订阅弹窗：position:fixed 表单（offsetParent=null 的可见性盲区场景） -->
+<div style="position:fixed;left:20px;top:20px;width:300px;background:#fff;padding:16px;box-shadow:0 4px 20px rgba(0,0,0,.2);z-index:9999;">
+  <h2>会員登録</h2>
+  <form id="modal-form">
+    <label for="m-email">メールアドレス</label>
+    <input id="m-email" type="email" required>
+    <label for="m-pass">パスワード</label>
+    <input id="m-pass" type="password" required>
+    <button type="submit" id="m-submit">登録する</button>
+  </form>
+</div>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

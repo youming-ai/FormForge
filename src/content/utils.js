@@ -34,7 +34,15 @@ function setInputValue (el, value) {
   setValue(el, value)
 }
 
-const visible = el => !!el && el.offsetParent !== null
+// 可见性：offsetParent 对 position:fixed 元素恒为 null（弹窗/悬浮表单会被误判不可见），
+// 改用渲染盒尺寸判断（display:none / 宽高为 0 → 不可见），并优先用原生 checkVisibility。
+const visible = el => {
+  if (!el) return false
+  if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: false })
+  // 兜底：元素有渲染盒且在视口树内
+  const rect = el.getBoundingClientRect()
+  return rect.width > 0 && rect.height > 0
+}
 
 // 从 localStorage 里的 JWT(ACCESS_TOKEN, es-banana 缓存)解出当前登录用户邮箱
 function detectUserEmail () {

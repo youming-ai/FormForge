@@ -42,6 +42,17 @@ const stepTitle = () =>
 
 // —— 控件类型（Ant 组件优先，原生兜底；执行端 dom-tools 再按有无 .ant-* 分支）——
 function classify (item) {
+  // item 自身即控件（多个 label+input 平铺共享父容器时，降级为控件本身作单元）：
+  // querySelector 只查后代查不到自身，须直接判断
+  if (item.matches?.('input, select, textarea')) {
+    if (item.matches('input[type="file"]')) return 'upload'
+    if (item.matches('input[type="date"], input[type="month"]')) return 'date'
+    if (item.matches('input[type="radio"]')) return 'radio'
+    if (item.matches('input[type="checkbox"]')) return 'checkbox'
+    if (item.tagName === 'SELECT') return 'select'
+    if (item.tagName === 'TEXTAREA') return 'textarea'
+    return 'text'
+  }
   if (item.querySelector('.ant-upload') || item.querySelector('input[type="file"]')) return 'upload'
   if (item.querySelector('.ant-picker') || item.querySelector('input[type="date"], input[type="month"]')) return 'date'
   if (item.querySelector('.ant-radio-group') || item.querySelector('input[type="radio"]')) return 'radio'
@@ -63,14 +74,21 @@ const labelOf = item => {
       .map(n => n.textContent).join('')
     return txt.trim().replace(/\s+/g, ' ')
   }
-  const t = item.querySelector('.ant-form-item-label label, label')?.textContent
+  // item 自身即控件（平铺结构的降级单元）：label 查询不含自身，改查兄弟 label[for] 或自身 aria-label
+  const selfId = item.matches?.('input, select, textarea') ? item.id : ''
+  const t = (selfId && document.querySelector(`label[for="${CSS.escape(selfId)}"]`)?.textContent)
+    || item.querySelector('.ant-form-item-label label, label')?.textContent
     || item.getAttribute?.('aria-label')
     || ''
   return String(t).trim().replace(/\s+/g, ' ')
 }
 
-const errorOf = item =>
-  (item.querySelector('.ant-form-item-explain-error, .invalid-feedback, .error-message, [class*="form-error"], [class*="invalid"]')?.textContent || '').trim()
+const errorOf = item => {
+  const sel = '.ant-form-item-explain-error, .invalid-feedback, .error-message, .field-error, [class*="form-error"], [aria-invalid="true"]'
+  const scope = item.matches?.('input, select, textarea') ? (item.parentElement || item.closest('div, p, li')) : item
+  const el = scope?.querySelector(sel)
+  return (el?.textContent || '').trim()
+}
 
 // 必填：Ant 标记 / 原生 required / aria-required
 const isRequired = item =>
@@ -79,7 +97,7 @@ const isRequired = item =>
 
 // 取控件 placeholder 当标签兜底（无 label 只有 placeholder 的字段，如地址组子字段）
 const placeholderOf = item => {
-  const el = item.querySelector('input[placeholder], textarea[placeholder]')
+  const el = (item.matches?.('input[placeholder], textarea[placeholder]') && item) || item.querySelector('input[placeholder], textarea[placeholder]')
   if (el) return (el.getAttribute('placeholder') || '').trim()
   const sp = item.querySelector('.ant-select-selection-placeholder')
   return sp ? sp.textContent.trim() : ''
@@ -89,7 +107,10 @@ const placeholderOf = item => {
 const radioTextOf = i => (i.closest('label')?.textContent || i.value || '').trim()
 
 function valueOf (item, kind) {
-  if (kind === 'text' || kind === 'textarea') return (item.querySelector('textarea, input')?.value || '')
+  if (kind === 'text' || kind === 'textarea') {
+    if (item.matches?.('input, textarea')) return item.value || ''
+    return (item.querySelector('textarea, input')?.value || '')
+  }
   if (kind === 'select') {
     const ant = item.querySelector('.ant-select-selection-item')
     if (ant) return (ant.getAttribute('title') || ant.textContent).trim()
@@ -162,7 +183,13 @@ function nativeFieldUnits (scope, covered) {
     } else {
       box = el.closest('label') || el.parentElement
     }
-    if (!box || seen.has(box)) continue
+    if (!box) continue
+    if (seen.has(box)) {
+      // 常见结构：多个 label+input 平铺在 form/同一父容器里，共享 box 会被去重丢字段 → 降级为控件自身作单元
+      if (box === el.parentElement || box === el.closest('label')) box = el
+      else continue
+    }
+    if (seen.has(box)) continue
     seen.add(box)
     units.push(box)
   }
@@ -205,11 +232,11 @@ function buildSnapshot () {
     const active = cards.find(c => c.classList.contains('active'))
     const titleOf = c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim()
     fields.push({
-      ref, kind: 'cards', label: '料金プラン/方案卡片',
+      ref, kind: 'cards', label: '方案/计划卡片',
       value: active ? titleOf(active) : '',
       filled: !!active,
       ...(active ? {} : { options: cards.map(titleOf) }), // 已选中的卡片不必再给选项列表，省 token
-      required: true,
+      required: true, // 卡片组通常必填（elepay 料金プラン即如此）；若目标站点非必填，跳过即可
     })
   })
 
@@ -296,4 +323,12 @@ function buildSnapshot () {
   }
 }
 
-const getRef = ref => REFS.find(r => r.ref === ref)
+// 按 ref 取字段：ref 已失效（SPA 路由切换/步骤重建后 DOM 节点被移除）时返回 null，
+// 调用方会得到「ref 已失效，请 get_form 重新快照」的明确提示，而不是静默写孤儿节点。
+const getRef = ref => {
+  const r = REFS.find(r => r.ref === ref)
+  if (!r) return null
+  // 按钮类元素（如住所自動入力）可能被框架暂时移出 DOM 又放回；其它字段一旦 detach 即失效
+  if (r.kind !== 'button' && r.item.isConnected === false) return null
+  return r
+}

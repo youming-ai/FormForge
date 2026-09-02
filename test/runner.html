@@ -208,6 +208,46 @@ window.chrome = {
   eq(r12.ok, true, 'B12 textarea fill ok')
   eq(document.getElementById('f-bio').value, 'よろしくお願いします。', 'B12b textarea 值已写入')
 
+  // ===== D. P1 修复验证 =====
+  out.push('<div class="section">D. P1 修复验证</div>')
+
+  // D1: position:fixed 的弹窗表单可见（offsetParent 盲区修复）
+  const modal = document.createElement('div')
+  modal.style.cssText = 'position:fixed;left:20px;top:20px;z-index:99999;background:#fff;padding:10px;'
+  modal.innerHTML = '<form id="fixed-form"><label for="f-modal">モーダル入力</label><input id="f-modal" type="text" required><button type="button">次へ</button></form>'
+  document.body.appendChild(modal)
+  const fixedInput = document.getElementById('f-modal')
+  eq(visible(fixedInput), true, 'D1 fixed 定位元素 visible()（修复前 offsetParent=null 误判不可见）')
+  modal.remove() // D1b 在 C 区后用 iframe（fixtures-fixed.html）验证——scope 选「控件最多的 form」，本页 main-form 优先是设计行为
+
+  // D2: detached ref → getRef 返回 null（明确报错而非静默写孤儿节点）
+  const orph = document.createElement('div')
+  orph.innerHTML = '<input id="f-orph" type="text">'
+  document.body.appendChild(orph)
+  const tmpSnap = buildSnapshot()
+  const orphField = tmpSnap.fields.find(f => (f.label || '').includes('サイド') === false && f.ref)
+  // 直接构造：取一个字段后把它的 DOM 移除
+  const orphRef = tmpSnap.fields[0]?.ref
+  orph.remove()
+  // tmpSnap 的 REFS 已被后续 buildSnapshot 覆盖，改为在隔离环境模拟：
+  // 手动把 REFS 里一个字段的 item detach 后再 getRef
+  const snap2 = buildSnapshot() // 重建 REFS
+  const anyField = snap2.fields[0]
+  if (anyField) {
+    const origItem = getRef(anyField.ref).item
+    const origParent = origItem.parentElement
+    const detachedHolder = document.createElement('div')
+    detachedHolder.appendChild(origItem) // 从原位移除（detach）
+    const afterDetach = getRef(anyField.ref)
+    eq(afterDetach, null, 'D2 detached 节点的 ref 返回 null（修复前会静默返回孤儿节点）')
+    const rOrph = await execTool('fill_text', { ref: anyField.ref, value: 'x' })
+    eq(rOrph.ok, false, 'D2b 对失效 ref 的 fill_text 明确失败')
+    assert(/失效|重新 get_form/.test(rOrph.result || ''), 'D2c 提示重新 get_form')
+    origParent.appendChild(origItem) // 还原
+  } else {
+    fail('D2 无字段可测')
+  }
+
   // ===== C. 确认页/中间页（iframe 加载同源 fixture，各自含模块）=====
   out.push('<div class="section">C. 确认页判定与拦截</div>')
   const probe = async (page, fn) => {
@@ -239,6 +279,16 @@ window.chrome = {
   })
   eq(c2.conf, false, 'C3 中间步骤页非确认')
   eq(c2.ok, true, 'C4 中间步骤「次へ」放行')
+
+  // D1b: fixed 弹窗表单页（页面唯一 form）——字段进快照 + 提交词拦截
+  const c3 = await probe('fixtures-fixed.html', async w => {
+    w.eval('(async () => { const snap = buildSnapshot(); const email = snap.fields.find(f => (f.label||"").includes("メールアドレス")); const pass = snap.fields.find(f => (f.label||"").includes("パスワード")); const blocked = await execTool("click_button", { target: "next" }); window.__r = JSON.stringify({ emailOk: !!(email && email.kind === "text" && email.required), passOk: !!(pass && pass.kind === "text"), blocked }) })()')
+    await new Promise(res => setTimeout(res, 3000))
+    return JSON.parse(w.__r)
+  })
+  eq(c3.emailOk, true, 'D1b fixed 弹窗字段进快照（email required）')
+  eq(c3.passOk, true, 'D1b fixed 弹窗字段进快照（password）')
+  eq(c3.blocked.ok, false, 'D1b 「登録する」按钮被词表拦截')
 
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length

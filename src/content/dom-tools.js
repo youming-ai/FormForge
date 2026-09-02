@@ -96,12 +96,12 @@ async function closeSelect (item) {
 
 async function fillText (ref, value) {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   // 防误用：上传/日期/单选/复选/卡片不适用 fill_text（select 保留：搜索型下拉需要键入过滤）
   if (['upload', 'date', 'radio', 'checkbox', 'cards'].includes(r.kind)) {
     return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、radio/checkbox/cards→choose_option` }
   }
-  const input = r.item.querySelector('textarea, input')
+  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('textarea, input')
   if (!input) return { ok: false, result: '该字段不是文本框' }
   setNativeValue(input, value)
   await sleep(30)
@@ -113,7 +113,7 @@ async function fillText (ref, value) {
 
 async function chooseOption (ref, option) {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
 
   if (r.kind === 'select') {
     // 原生 <select>：直接设值（不走 Ant 互斥锁/浮层逻辑）
@@ -319,7 +319,7 @@ async function makeUploadFile () {
 // 向 Ant Upload 字段塞文件并触发上传（默认 dummy 图 / 面板固定图）
 async function uploadFile (ref) {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   const input = r.item.querySelector('input[type="file"]')
   if (!input) return { ok: false, result: '该字段不是上传组件（找不到 file input）' }
   let file
@@ -356,7 +356,7 @@ async function uploadFile (ref) {
 // 点任意按钮/元素（如「住所自動入力」），ref 来自 get_form 的 actions/fields
 async function clickElement (ref) {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止点击页面元素（防误提交），请调用 finish 结束。' }
   const el = r.item.matches('button') ? r.item : (r.item.querySelector('button') || r.item)
   const label = (r.item.textContent || '').trim()
@@ -379,7 +379,7 @@ async function clickElement (ref) {
 
 async function readOptions (ref, query = '') {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   if (r.kind === 'radio') {
     return { ok: true, result: { options: radioOptionsOf(r.item) } }
   }
@@ -431,7 +431,7 @@ async function readOptions (ref, query = '') {
 
 async function setDate (ref, y, m, d) {
   const r = getRef(ref)
-  if (!r) return { ok: false, result: `ref ${ref} 不存在，请重新 get_form` }
+  if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   // 原生 date input：直接设 YYYY-MM-DD
   const native = r.item.querySelector('input[type="date"]') || (r.item.matches?.('input[type="date"]') ? r.item : null)
   if (native) {
@@ -505,13 +505,16 @@ async function clickButton (target) {
     return { ok: false, result: `「${label}」疑似最终提交按钮，已硬拦截（安全红线：绝不提交）。若确是中间步骤按钮，请用 finish 说明留人工。` }
   }
 
-  // 轮询等步骤/表单变化（标题/确认页/控件数量/所有值签名），有变化早退
-  const allInputs = () => [...document.querySelectorAll('input, select, textarea')]
-  const before = { t: stepTitle(), c: isConfirm(), n: allInputs().length, sig: allInputs().map(e => e.value).join('§') }
+  // 轮询等步骤/表单变化（标题/确认页/控件数量/值签名），有变化早退。
+  // 签名只算 scope 内控件（全页面计算在长表单上是 O(n) 每轮 × 19 次轮询的开销）
+  const scope = scopeEl()
+  const scopeInputs = () => [...scope.querySelectorAll('input, select, textarea')]
+  const sig = () => scopeInputs().map(e => e.value).join('§')
+  const before = { t: stepTitle(), c: isConfirm(), n: scopeInputs().length, s: sig() }
   btn.click()
   const changed = await waitFor(() => {
-    const now = { t: stepTitle(), c: isConfirm(), n: allInputs().length, sig: allInputs().map(e => e.value).join('§') }
-    return now.t !== before.t || now.c !== before.c || now.n !== before.n || now.sig !== before.sig
+    const now = { t: stepTitle(), c: isConfirm(), n: scopeInputs().length, s: sig() }
+    return now.t !== before.t || now.c !== before.c || now.n !== before.n || now.s !== before.s
   }, { timeout: 1500, step: 80 })
   // 等新步骤渲染出表单控件（早退），替代固定 sleep
   await waitFor(() => !!document.querySelector('.ant-form-item, form, input, select, textarea'), { timeout: 800, step: 60 })
