@@ -105,6 +105,9 @@ async function fillText (ref, value) {
   if (!input) return { ok: false, result: '该字段不是文本框' }
   setNativeValue(input, value)
   await sleep(30)
+  // 主动 blur：很多框架在失焦时才触发校验，让错误尽早出现在下一次 get_form 快照里
+  input.blur()
+  await sleep(50)
   return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
 }
 
