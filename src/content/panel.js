@@ -306,7 +306,7 @@ function setStatus (t) {
   if (!ui) return
   const short = ui.card.classList.contains('running')
     ? '実行中'
-    : (/失敗|エラー|禁止|未授权|タイムアウト|超时|连不上|接続|上限|已达最大|无法|できない|要確認/.test(t) ? '要確認' : (/保存/.test(t) ? '保存完了' : (/終了|完了|结束/.test(t) ? '完了' : '待機中')))
+    : (/失敗|エラー|禁止|未授权|タイムアウト|超时|连不上|接続|上限|已达最大|无法|できない|要確認|推理服务/.test(t) ? '要確認' : (/保存/.test(t) ? '保存完了' : (/終了|完了|结束/.test(t) ? '完了' : '待機中')))
   ui.headstatus.textContent = short
 }
 

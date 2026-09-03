@@ -95,8 +95,9 @@ async function closeSelect (item) {
 }
 
 // 操作前把字段滚进视口（长表单/分步表单里字段可能在视口外，滚动后交互更稳）
+// block:'nearest'：已在视口内不滚动，比 'center' 少触发重排与页面跳动
 function ensureVisible (item) {
-  try { item.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch (_) { try { item.scrollIntoView() } catch (_) {} }
+  try { item.scrollIntoView({ block: 'nearest', behavior: 'instant' }) } catch (_) { try { item.scrollIntoView() } catch (_) {} }
 }
 
 async function fillText (ref, value) {

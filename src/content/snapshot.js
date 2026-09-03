@@ -322,8 +322,9 @@ function buildSnapshot () {
   })
 
   // 5) 步骤内其它可点按钮（如「住所自動入力」/「自动带入地址」），给 ref 供 click 使用
+  // 上限 20 个：复杂页面按钮再多也与填表无关，截断控制快照 token（与 buttons 的 15 个上限同理）
   const actions = []
-  scope.querySelectorAll('button').forEach(b => {
+  ;[...scope.querySelectorAll('button')].slice(0, 20).forEach(b => {
     if (!visible(b) || b.disabled) return
     const label = b.textContent.trim()
     if (!label) return
@@ -337,9 +338,11 @@ function buildSnapshot () {
   })
 
   // 按页面视觉顺序（文档序）重排字段，保证模型从上到下逐个处理
+  // ref→item 建表一次：sort 比较触发 O(n log n) 次回调，逐次 REFS.find 是 O(n²) 线性扫描，大表单下省掉重复遍历
+  const itemOf = new Map(REFS.map(r => [r.ref, r.item]))
   fields.sort((a, b) => {
-    const ea = REFS.find(r => r.ref === a.ref)?.item
-    const eb = REFS.find(r => r.ref === b.ref)?.item
+    const ea = itemOf.get(a.ref)
+    const eb = itemOf.get(b.ref)
     if (!ea || !eb) return 0
     return ea.compareDocumentPosition(eb) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
   })
