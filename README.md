@@ -39,7 +39,7 @@
 1. 准备一个 OpenAI 兼容的本地推理服务（llama.cpp / llama-swap 或 LM Studio），加载一个**支持 function calling** 的模型（如 Qwen3-30B-A3B），开启对外监听。
 2. `chrome://extensions/` → 开发者模式 → 加载已解压扩展 → 选本目录。
 3. 打开加盟店申请**新建**表单页 → 右下角出现浮窗 → 展开「设置」确认接口地址/模型 → 保存。
-   - 默认接口 `http://10.0.0.64:8434/v1/chat/completions`（局域网 LM Studio）；备选 macstudio llama.cpp/llama-swap `http://10.0.0.64:8800/...`、Tailscale `http://100.96.69.27:8434/...`、本机 `http://localhost:1234/...`。
+   - 默认接口 `http://<your-host>:8434/v1/chat/completions`（局域网 LM Studio）；备选 macstudio llama.cpp/llama-swap `http://<your-host>:8800/...`、Tailscale `http://<tailscale-host>:8434/...`、本机 `http://localhost:1234/...`。
    - 模型默认 `qwen/qwen3-30b-a3b-2507`（Qwen3-30B-A3B MoE，3B 激活），填 `auto` 则调 `/v1/models` 自动选已加载模型。
 4. 填场景（可留空）→「开始填写」→ 看浮窗里 agent 的实时动作日志。
 
