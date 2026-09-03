@@ -11,7 +11,7 @@
 
 ## 能力
 
-- **控件**：text / textarea / select / radio / checkbox / date / file / 可点卡片；Ant Design 优先 + 原生 HTML 兜底，多步骤向导、单页长表单、弹窗表单均支持。
+- **控件**：text / number / textarea / 富文本 / select（含多选/远程） / radio / checkbox / switch 开关 / date / file / 可点卡片；Ant Design 优先 + 原生 HTML 兜底，多步骤向导、单页长表单、弹窗表单均支持。
 - **智能**：读真实下拉选项、按校验错误自动修正（如カナ字段转片假名）、按页面顺序逐个填、失败留人工不卡死。
 - **安全**：`click_button` 硬拦截「最终提交」类按钮（送信/登録/Submit/購入等词表），确认页只能 `finish`，绝不提交真实申请。
 

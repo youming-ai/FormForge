@@ -1,5 +1,6 @@
 // snapshot.js —— 「眼」：get_form 表单快照与 ref 管理（通用表单扫描）
-// 分层适配：① Ant Design 字段优先 ② 可点卡片(plan-select) ③ 原生 HTML 控件兜底（任意网页表单：label/fieldset/原生 input/select/textarea）
+// 分层适配：① Ant Design 字段优先 ② 可点卡片组（无障碍 role 模式） ③ 原生 HTML 控件兜底（任意网页表单：label/fieldset/原生 input/select/textarea）
+// 刻意不含任何站点专有选择器：自定义卡片请用 [role=radiogroup]/[role=radio|option] 语义化标记。
 // 每次 buildSnapshot 重建 REFS（ref → {item, kind}），供 dom-tools 按 ref 操作。
 
 let REFS = [] // [{ref, item, kind}]
@@ -51,16 +52,21 @@ function classify (item) {
     if (item.matches('input[type="date"], input[type="month"]')) return 'date'
     if (item.matches('input[type="radio"]')) return 'radio'
     if (item.matches('input[type="checkbox"]')) return 'checkbox'
+    if (item.matches('input[type="number"]')) return 'number'
     if (item.tagName === 'SELECT') return 'select'
     if (item.tagName === 'TEXTAREA') return 'textarea'
     return 'text'
   }
+  // 开关本体（button[role=switch]，无 input 子元素）：input 系已在上分支返回，这里只剩非 input 元素
+  if (item.matches?.('.ant-switch, [role="switch"]')) return 'switch'
   if (item.querySelector('.ant-upload') || item.querySelector('input[type="file"]')) return 'upload'
   if (item.querySelector('.ant-picker') || item.querySelector('input[type="date"], input[type="month"]')) return 'date'
+  if (item.querySelector('.ant-input-number') || item.querySelector('input[type="number"]')) return 'number'
   if (item.querySelector('.ant-radio-group') || item.querySelector('input[type="radio"]')) return 'radio'
   if (item.querySelector('.ant-select') || item.querySelector('select')) return 'select'
   if (item.querySelector('textarea')) return 'textarea'
   if (item.querySelector('.ant-checkbox-wrapper') || item.querySelector('input[type="checkbox"]')) return 'checkbox'
+  if (item.querySelector('.ant-switch')) return 'switch'
   if (item.querySelector('input:not([type="file"])')) return 'text'
   // contenteditable 富文本（div[contenteditable] 等，现代表单常见）
   if (item.matches?.('[contenteditable="true"], [contenteditable=""]') || item.querySelector('[contenteditable="true"], [contenteditable=""]')) return 'richtext'
@@ -111,9 +117,10 @@ const placeholderOf = item => {
 const radioTextOf = i => (i.closest('label')?.textContent || i.value || '').trim()
 
 function valueOf (item, kind) {
-  if (kind === 'text' || kind === 'textarea') {
+  if (kind === 'text' || kind === 'textarea' || kind === 'number') {
     if (item.matches?.('input, textarea')) return item.value || ''
-    return (item.querySelector('textarea, input')?.value || '')
+    // 数字框优先读 .ant-input-number-input，避免抓到 stepper 等无关 input
+    return (item.querySelector('.ant-input-number-input, textarea, input')?.value || '')
   }
   if (kind === 'select') {
     // Ant select：单/多选都取所有已选 .ant-select-selection-item（多选有多个）
@@ -146,6 +153,12 @@ function valueOf (item, kind) {
     if (n) return `已上传 ${n} 个文件`
     return item.querySelector('input[type="file"]')?.files?.length ? '已选文件' : ''
   }
+  if (kind === 'switch') {
+    const sw = item.matches?.('.ant-switch, [role="switch"]') ? item : item.querySelector('.ant-switch, [role="switch"]')
+    if (!sw) return ''
+    const on = sw.classList.contains('ant-switch-checked') || sw.getAttribute('aria-checked') === 'true'
+    return on ? 'on' : 'off'
+  }
   if (kind === 'richtext') {
     const el = item.matches?.('[contenteditable]') ? item : item.querySelector('[contenteditable]')
     return (el?.textContent || '').trim()
@@ -174,7 +187,7 @@ function nativeFieldUnits (scope, covered) {
     .filter(el => visible(el) && !el.disabled)
     .filter(el => !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
     .filter(el => !covered.some(c => c.contains(el)))
-    .filter(el => !el.closest('.ant-select, .ant-picker, .ant-upload, .plan-select'))
+    .filter(el => !el.closest('.ant-select, .ant-picker, .ant-upload'))
   const units = []
   const seen = new Set()
   for (const el of els) {
@@ -205,21 +218,10 @@ function nativeFieldUnits (scope, covered) {
   return units
 }
 
-// —— 可点卡片组检测（通用）：① 站点自定义 .plan-select ② [role=radio]/[role=option] 组 ——
+// —— 可点卡片组检测（通用无障碍模式：[role=radio]/[role=option] 组，如套餐/方案二选一卡片）——
 // 返回 [{root, cards, titleOf, activeOf}]；titleOf 取卡片标题，activeOf 判选中态。
 function findCardGroups (scope) {
   const groups = []
-  // ① 已知站点模式 .plan-select（自定义方案选择卡片）
-  for (const root of scope.querySelectorAll('.plan-select')) {
-    const cards = [...root.querySelectorAll('.plan-select__plan')]
-    if (cards.length) groups.push({
-      root,
-      cards,
-      titleOf: c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim(),
-      activeOf: c => c.classList.contains('active'),
-    })
-  }
-  // ② role=radio/option 组（可点卡片式选择，通用无障碍模式）
   for (const grp of scope.querySelectorAll('[role="radiogroup"], [role="group"]')) {
     const cards = [...grp.querySelectorAll('[role="radio"], [role="option"]')].filter(visible)
     if (cards.length > 1) groups.push({
@@ -253,13 +255,13 @@ function buildSnapshot () {
   const items = [...scope.querySelectorAll('.ant-form-item')].filter(visible)
   for (const item of items) {
     if (item.querySelector('.ant-form-item')) continue // 跳过含嵌套子项的父容器
-    if (item.querySelector('.plan-select')) continue // 料金プラン卡片另行处理
     covered.push(item)
     let kind = classify(item)
     const ref = 'e' + REFS.length
     REFS.push({ ref, item, kind })
     const f = { ref, kind, label: labelOf(item) || placeholderOf(item), value: valueOf(item, kind), required: isRequired(item) }
     f.filled = !!String(f.value || '').trim()
+    if (kind === 'switch') f.filled = f.value === 'on' // 开关 off 是有效字符串，需单独判定
     if (kind === 'select' && item.querySelector('.ant-select-multiple')) f.multiple = true // 多选下拉
     const err = errorOf(item)
     if (err) f.error = err
@@ -269,7 +271,7 @@ function buildSnapshot () {
     fields.push(f)
   }
 
-  // 2) 可点卡片组（.plan-select 或 role=radio/option 组）
+  // 2) 可点卡片组（[role=radio]/[role=option] 无障碍组）
   for (const { root, cards, titleOf, activeOf } of findCardGroups(scope)) {
     if (!visible(root)) continue
     covered.push(root)
@@ -294,6 +296,7 @@ function buildSnapshot () {
     REFS.push({ ref, item: box, kind })
     const f = { ref, kind, label: labelOf(box) || placeholderOf(box), value: valueOf(box, kind), required: isRequired(box) }
     f.filled = !!String(f.value || '').trim()
+    if (kind === 'switch') f.filled = f.value === 'on' // 开关 off 是有效字符串，需单独判定
     const err = errorOf(box)
     if (err) f.error = err
     if (kind === 'radio' && !f.filled) f.options = radioOptionsOf(box)

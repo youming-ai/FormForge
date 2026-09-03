@@ -378,6 +378,70 @@ window.chrome = {
   eq(c4.fillOk, true, 'F12d 富文本可填')
   eq(c4.text, '問い合わせテスト', 'F12e 富文本值落盘')
 
+  // ===== G. InputNumber + Switch =====
+  out.push('<div class="section">G. InputNumber 与 Switch</div>')
+  // G1: Ant InputNumber 识别 + 填写回读
+  const numAnt = document.createElement('div')
+  numAnt.className = 'ant-form-item'
+  numAnt.innerHTML = '<div class="ant-form-item-label"><label>金額</label></div><div class="ant-input-number"><div class="ant-input-number-input-wrap"><input class="ant-input-number-input" autocomplete="off"></div></div>'
+  document.getElementById('main-form').appendChild(numAnt)
+  const numAntF = buildSnapshot().fields.find(f => f.label === '金額')
+  assert(numAntF && numAntF.kind === 'number', 'G1 Ant InputNumber 识别为 number')
+  if (numAntF) {
+    const rNum = await execTool('fill_text', { ref: numAntF.ref, value: '12345' })
+    eq(rNum.ok, true, 'G1b 数字 fill ok')
+    eq(numAnt.querySelector('.ant-input-number-input').value, '12345', 'G1c 值已写入')
+  }
+  numAnt.remove()
+
+  // G2: 原生 input[type=number]
+  const numNat = document.createElement('div')
+  numNat.className = 'field'
+  numNat.innerHTML = '<label for="t-num">数量Num</label><input id="t-num" type="number">'
+  document.getElementById('main-form').appendChild(numNat)
+  const numNatF = buildSnapshot().fields.find(f => f.label === '数量Num')
+  assert(numNatF && numNatF.kind === 'number', 'G2 原生 number 识别')
+  if (numNatF) {
+    const rN2 = await execTool('fill_text', { ref: numNatF.ref, value: '42' })
+    eq(rN2.ok, true, 'G2b 原生 number fill ok')
+    eq(document.getElementById('t-num').value, '42', 'G2c 值已写入')
+  }
+  numNat.remove()
+
+  // G3: Ant Switch 开关语义（click 监听模拟框架双向绑定翻转 class）
+  const swWrap = document.createElement('div')
+  swWrap.className = 'ant-form-item'
+  swWrap.innerHTML = '<div class="ant-form-item-label"><label>通知を受け取る</label></div><button type="button" class="ant-switch" role="switch" aria-checked="false"><span class="ant-switch-inner"></span></button>'
+  document.getElementById('main-form').appendChild(swWrap)
+  const swEl = swWrap.querySelector('.ant-switch')
+  swEl.addEventListener('click', () => {
+    const on = swEl.classList.toggle('ant-switch-checked')
+    swEl.setAttribute('aria-checked', String(on))
+  })
+  const swF = buildSnapshot().fields.find(f => f.label === '通知を受け取る')
+  assert(swF && swF.kind === 'switch', 'G3 Ant Switch 识别为 switch')
+  eq(swF && swF.value, 'off', 'G3b 初始 off')
+  eq(swF && swF.filled, false, 'G3c off 视为未填')
+  if (swF) {
+    eq((await execTool('choose_option', { ref: swF.ref, option: 'on' })).ok, true, 'G3d 开关打开 ok')
+    eq(swEl.classList.contains('ant-switch-checked'), true, 'G3e 状态已翻转')
+    const rOn2 = await execTool('choose_option', { ref: swF.ref, option: 'on' })
+    eq(rOn2.ok, true, 'G3f 重复 on 不报错（防循环）')
+    assert(/已是目标状态/.test(rOn2.result || ''), 'G3g 提示已是目标状态', rOn2.result)
+    eq((await execTool('choose_option', { ref: swF.ref, option: 'off' })).ok, true, 'G3h 开关关闭 ok')
+    eq((await execTool('choose_option', { ref: swF.ref, option: 'maybe' })).ok, false, 'G3i 非法 option 明确失败')
+    eq((await execTool('fill_text', { ref: swF.ref, value: 'x' })).ok, false, 'G3j fill_text 写开关被拦截')
+  }
+  swWrap.remove()
+
+  // G4: 原生 role=switch 的 checkbox 仍走 checkbox 路径（不抢分类）
+  const swNat = document.createElement('div')
+  swNat.innerHTML = '<label><input id="t-sw" type="checkbox" role="switch">原生开关</label>'
+  document.getElementById('main-form').appendChild(swNat)
+  const swNatF = buildSnapshot().fields.find(f => (f.label || '').includes('原生开关'))
+  assert(swNatF && swNatF.kind === 'checkbox', 'G4 原生 role=switch checkbox 仍为 checkbox')
+  swNat.remove()
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`

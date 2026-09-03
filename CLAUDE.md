@@ -18,7 +18,7 @@
 
 ## 目标表单的 DOM 现实（踩坑知识，改 content.js 前必读）
 
-- **作用域**：Ant 表单字段用 `.ant-form-item` 扫描取叶子（`!querySelector('.ant-form-item')`）；通用兜底扫原生 `input/select/textarea`。每字段给 `ref/kind/label/value/required/filled/error`。kind: text/textarea/select/radio/checkbox/date/upload/cards/unknown。
+- **作用域**：Ant 表单字段用 `.ant-form-item` 扫描取叶子（`!querySelector('.ant-form-item')`）；通用兜底扫原生 `input/select/textarea`。每字段给 `ref/kind/label/value/required/filled/error`。kind: text/number/textarea/select/radio/checkbox/switch/date/upload/cards/richtext/unknown。
 - **确认页判定**：范围内没有可编辑控件（含 contenteditable 富文本）+ 页面出现「最终提交」类按钮（`SUBMIT_WORDS` 词表，唯一入口 `isSubmitLabel`：含导航词如「登録して次へ」时导航优先、不视为提交）→ 视为确认页。`click_button` 在确认页**硬拦截**，只允许 `finish`，绝不提交。
 - **字段扫描**：Ant 的 `.ant-form-item`（含地址组等子字段无 label 只有 placeholder）或原生（label-for / label 包裹 / fieldset+legend / aria-label / placeholder 五级标签兜底）。必填查 `required` 属性 / aria-required / Ant 的 `.ant-form-item-required`。
 - **日期选择器**：Ant `a-date-picker`（键入完整日期 + Enter + blur 回读校验）或原生 `input[type=date]`（直接设 `YYYY-MM-DD`）。

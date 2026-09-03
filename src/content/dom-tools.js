@@ -2,11 +2,12 @@
 // 注：同一轮的多个工具调用会被 background 并行执行，select 类操作用互斥锁排队，避免多个下拉互相开合干扰
 
 const optText = o => (o.getAttribute('title') || o.textContent || '').trim()
-// 可用选项 = 非禁用、非搜索提示项（es-options-item-tips 是「输入关键词搜索」提示，不是选项）
+// 可用选项 = 非禁用、非提示行（部分搜索型下拉会混入「输入关键词搜索」之类的提示项，不是选项）
+// 通用 heuristic：class 名含 tip/hint 且无可用语义的行视为提示（误伤时回读校验会拦截并报错）
 const usableOption = o =>
   o.getAttribute('aria-disabled') !== 'true' &&
   !o.classList.contains('ant-select-item-option-disabled') &&
-  !o.classList.contains('es-options-item-tips')
+  !/(^|-)tips?($|-)|hint/i.test(o.className || '')
 // 下拉状态：'usable' 有可用选项 / 'empty' 空态 / false 仍加载中。
 // 注意：空态(.ant-empty)若立即当作就绪，会在异步选项还没到达时就提前返回，拿到空列表。
 const optionState = root => {
@@ -79,9 +80,8 @@ async function openSelect (item) {
     input.focus()
     input.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
   }
-  // 等「可见浮层」里出现可用选项（动态接口选项异步到达）；搜索型下拉给 4s
-  const timeout = item.querySelector('.es-search-select') ? 4000 : 2500
-  return await waitFor(() => optionState(activeDropdown(item)) === 'usable', { timeout, step: 50 })
+  // 等「可见浮层」里出现可用选项（动态接口选项异步到达）
+  return await waitFor(() => optionState(activeDropdown(item)) === 'usable', { timeout: 2500, step: 50 })
 }
 async function closeSelect (item) {
   const input = item.querySelector('input')
@@ -104,9 +104,9 @@ async function fillText (ref, value) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   ensureVisible(r.item)
-  // 防误用：上传/日期/单选/复选/卡片不适用 fill_text（select 保留：搜索型下拉需要键入过滤）
-  if (['upload', 'date', 'radio', 'checkbox', 'cards'].includes(r.kind)) {
-    return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、radio/checkbox/cards→choose_option` }
+  // 防误用：上传/日期/单选/复选/开关/卡片不适用 fill_text（select 保留：搜索型下拉需要键入过滤；数字框允许：走回读校验）
+  if (['upload', 'date', 'radio', 'checkbox', 'switch', 'cards'].includes(r.kind)) {
+    return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、radio/checkbox/switch/cards→choose_option` }
   }
   // contenteditable 富文本：直接写 textContent + 派发 input/change
   if (r.kind === 'richtext') {
@@ -120,13 +120,23 @@ async function fillText (ref, value) {
     await sleep(50)
     return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
   }
-  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('textarea, input')
+  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('.ant-input-number-input, textarea, input')
   if (!input) return { ok: false, result: '该字段不是文本框' }
   setNativeValue(input, value)
   await sleep(30)
   // 主动 blur：很多框架在失焦时才触发校验，让错误尽早出现在下一次 get_form 快照里
   input.blur()
   await sleep(50)
+  if (r.kind === 'number') {
+    // 数字框回读校验：formatter 可能重排显示（如 1000→1,000），按数值比对；被 min/max 钳制则如实上报
+    const num = s => { const n = parseFloat(String(s ?? '').replace(/[^0-9.\-]/g, '')); return Number.isFinite(n) ? n : NaN }
+    const got = input.value ?? ''
+    if (!String(got).trim()) return { ok: false, result: `数字「${labelOf(r.item)}」填入后为空（可能被 min/max 钳制或拒绝），请 get_form 复核` }
+    if (Number.isFinite(num(value)) && Number.isFinite(num(got)) && num(value) !== num(got)) {
+      return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}（目标 ${value}，显示值不一致，请 get_form 复核校验）` }
+    }
+    return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}` }
+  }
   return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
 }
 
@@ -292,10 +302,30 @@ async function chooseOption (ref, option) {
     return { ok: true, result: `「${option}」当前${w.querySelector('.ant-checkbox-checked') ? '已勾选' : '未勾选'}` }
   }
 
+  if (r.kind === 'switch') {
+    const sw = r.item.matches?.('.ant-switch, [role="switch"]') ? r.item : r.item.querySelector('.ant-switch, [role="switch"]')
+    if (!sw) return { ok: false, result: '该字段没有开关控件' }
+    const isOn = () => sw.classList.contains('ant-switch-checked') || sw.getAttribute('aria-checked') === 'true'
+    const want = String(option ?? '').trim()
+    if (/^(toggle|切换)$/i.test(want)) {
+      sw.click()
+      await sleep(80)
+      return { ok: true, result: `开关已翻转，当前 ${isOn() ? 'on' : 'off'}（请 get_form 复核）` }
+    }
+    const target = /^(on|开|check|true|1)$/i.test(want) ? true : /^(off|关|uncheck|false|0)$/i.test(want) ? false : null
+    if (target === null) return { ok: false, result: `开关请传 on/off/toggle（当前 ${isOn() ? 'on' : 'off'}）` }
+    if (isOn() === target) return { ok: true, result: `开关已是目标状态（${target ? 'on' : 'off'}），请前进到下一项` }
+    sw.click()
+    const flipped = await waitFor(() => isOn() === target, { timeout: 500, step: 50 })
+    return flipped
+      ? { ok: true, result: `开关已${target ? '打开' : '关闭'}` }
+      : { ok: false, result: '开关状态未变化，请 get_form 复核' }
+  }
+
   if (r.kind === 'cards') {
-    const cards = r.cards || [...r.item.querySelectorAll('.plan-select__plan')]
-    const titleOf = r.titleOf || (c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim())
-    const activeOf = r.activeOf || (c => c.classList.contains('active'))
+    const cards = r.cards || [...r.item.querySelectorAll('[role="radio"], [role="option"]')]
+    const titleOf = r.titleOf || (c => (c.textContent || '').trim())
+    const activeOf = r.activeOf || (c => c.getAttribute('aria-checked') === 'true' || c.classList.contains('active') || c.classList.contains('selected'))
     const card = cards.find(c => titleOf(c) === option) || cards.find(c => titleOf(c).includes(option))
     if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(titleOf).join(' / ')}` }
     card.click()
