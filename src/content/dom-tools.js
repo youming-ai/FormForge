@@ -484,6 +484,37 @@ async function readOptions (ref, query = '') {
   })
 }
 
+// 纯函数：按 placeholder 推断日期键入候选（首个为最可能格式），供 setDate 逐个尝试。
+// 覆盖：YYYY/MM/DD、MM/DD/YYYY、DD/MM/YYYY、YYYY年MM月DD日（日文）、示例日期/空（默认年优先）。
+function dateCandidates (ph, y, m, d) {
+  const norm = s => String(s || '').replace(/[^0-9]/g, '')
+  ph = String(ph || '').trim()
+  // 日文年月日（placeholder 含 年/月/日，如「YYYY年MM月DD日」）：优先键入汉字格式，再回退斜杠/年-月-日
+  if (/年/.test(ph)) {
+    const candidates = [`${y}年${pad2(m)}月${pad2(d)}日`, `${y}年${m}月${d}日`, `${y}/${pad2(m)}/${pad2(d)}`, `${y}-${pad2(m)}-${pad2(d)}`]
+    return { candidates, want: norm(candidates[0]) }
+  }
+  const sep = ph.includes('-') ? '-' : ph.includes('.') ? '.' : '/'
+  const up = ph.toUpperCase()
+  // 按 Y/M/D token 在 placeholder 中的首次出现位置排序（YYYY/MM/DD→ymd、MM/DD/YYYY→mdy、DD/MM/YYYY→dmy）；
+  // 无字母 token（示例日期如 2024/01/31 或空）→ 默认年优先，回退候选覆盖其它常见格式。
+  let order
+  if (/[YMD]/.test(up)) {
+    const pos = { Y: up.indexOf('Y'), M: up.indexOf('M'), D: up.indexOf('D') }
+    order = ['Y', 'M', 'D'].sort((a, b) => pos[a] - pos[b]).map(c => c === 'Y' ? 'y' : c === 'M' ? 'm' : 'd')
+  } else {
+    order = ['y', 'm', 'd']
+  }
+  // 按 order 首字母排年月日：y=年优先(ymd)、m=月优先(mdy)、d=日优先(dmy)
+  const P = { y, m, d }
+  const fmt = (s, o) => {
+    const seq = o === 'y' ? ['y', 'm', 'd'] : o === 'm' ? ['m', 'd', 'y'] : ['d', 'm', 'y']
+    return seq.map(k => P[k]).join(s)
+  }
+  const candidates = order.map(o => fmt(sep, o))
+  return { candidates, want: norm(candidates[0]) }
+}
+
 async function setDate (ref, y, m, d) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
@@ -501,29 +532,8 @@ async function setDate (ref, y, m, d) {
   const input = r.item.querySelector('.ant-picker-input input')
   if (!input) return { ok: false, result: '该字段不是日期选择器' }
   const norm = s => String(s || '').replace(/[^0-9]/g, '')
-  // 日期格式按 placeholder 推断（如「YYYY/MM/DD」「MM/DD/YYYY」「2024/01/31」），
-  // 再按常见格式回退，避免写死单一格式。
-  const ph = (input.getAttribute('placeholder') || '').trim()
-  const sep = ph.includes('-') ? '-' : ph.includes('.') ? '.' : '/'
-  const up = ph.toUpperCase()
-  // 按 Y/M/D token 在 placeholder 中的首次出现位置排序（YYYY/MM/DD→ymd、MM/DD/YYYY→mdy、DD/MM/YYYY→dmy）；
-  // 无字母 token（示例日期如 2024/01/31 或空）→ 默认年优先，回退候选覆盖其它常见格式。
-  let order
-  if (/[YMD]/.test(up)) {
-    const pos = { Y: up.indexOf('Y'), M: up.indexOf('M'), D: up.indexOf('D') }
-    order = ['Y', 'M', 'D'].sort((a, b) => pos[a] - pos[b]).map(c => c === 'Y' ? 'y' : c === 'M' ? 'm' : 'd')
-  } else {
-    order = ['y', 'm', 'd']
-  }
-  // 按 order 首字母排年月日：y=年优先(ymd)、m=月优先(mdy)、d=日优先(dmy)
-  const fmt = (s, o) => {
-    const first = o === 'y' ? y : o === 'm' ? m : d
-    const second = o === 'y' ? m : o === 'm' ? d : y
-    const third = o === 'y' ? d : o === 'm' ? y : m
-    return `${first}${s}${second}${s}${third}`
-  }
-  const candidates = order.map(o => fmt(sep, o))
-  const want = norm(candidates[0])
+  // 日期格式按 placeholder 推断（含日文 YYYY年MM月DD日），再按常见格式回退，避免写死单一格式
+  const { candidates, want } = dateCandidates(input.getAttribute('placeholder') || '', y, m, d)
 
   for (const v of candidates) {
     input.focus()

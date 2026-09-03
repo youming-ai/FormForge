@@ -442,6 +442,14 @@ window.chrome = {
   assert(swNatF && swNatF.kind === 'checkbox', 'G4 原生 role=switch checkbox 仍为 checkbox')
   swNat.remove()
 
+  // ===== G5. 日期候选纯函数（含日文年月日）=====
+  out.push('<div class="section">G5. dateCandidates 日期格式推断</div>')
+  eq(dateCandidates('YYYY年MM月DD日', 2024, 4, 5).candidates[0], '2024年04月05日', 'G5 日文 placeholder 首选年月日')
+  eq(dateCandidates('YYYY/MM/DD', 2024, 4, 5).candidates[0], '2024/4/5', 'G5b 斜杠年优先')
+  eq(dateCandidates('MM/DD/YYYY', 2024, 4, 5).candidates[0], '4/5/2024', 'G5c 美式月优先')
+  eq(dateCandidates('DD/MM/YYYY', 2024, 4, 5).candidates[0], '5/4/2024', 'G5d 欧式日优先')
+  eq(dateCandidates('', 2024, 4, 5).candidates[0], '2024/4/5', 'G5e 空 placeholder 默认年优先')
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`
