@@ -450,6 +450,10 @@ window.chrome = {
   eq(dateCandidates('DD/MM/YYYY', 2024, 4, 5).candidates[0], '5/4/2024', 'G5d 欧式日优先')
   eq(dateCandidates('', 2024, 4, 5).candidates[0], '2024/4/5', 'G5e 空 placeholder 默认年优先')
 
+  // G6: 语言检测不到时默认日文（目标表单以日文为主）
+  eq(detectLang(document.implementation.createHTMLDocument('')), '', 'G6 空文档检测不到语言')
+  eq(buildSnapshot().lang, 'ja', 'G6b 快照 lang 缺失时回退 ja')
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`

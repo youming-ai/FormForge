@@ -235,10 +235,12 @@ function findCardGroups (scope) {
 }
 
 // 页面语言检测：优先 html[lang]，否则按 body 文本 CJK 字符启发式（ja/zh/ko）
-function detectLang () {
-  const htmlLang = (document.documentElement?.getAttribute('lang') || '').trim()
+// 目标表单以日文为主：检测不到时默认按日文处理（多语言能力保留，prompt 按 lang 自适应）
+const DEFAULT_LANG = 'ja'
+function detectLang (doc = document) {
+  const htmlLang = (doc.documentElement?.getAttribute('lang') || '').trim()
   if (htmlLang) return htmlLang
-  const t = (document.body?.textContent || '').slice(0, 2000)
+  const t = (doc.body?.textContent || '').slice(0, 2000)
   if (/[\u3040-\u30ff]/.test(t)) return 'ja'
   if (/[\uac00-\ud7af]/.test(t)) return 'ko'
   if (/[\u4e00-\u9fff]/.test(t)) return 'zh'
@@ -363,7 +365,7 @@ function buildSnapshot () {
   return {
     stepTitle: stepTitle(),
     isConfirmStep: isConfirm(),
-    lang: detectLang(),
+    lang: detectLang() || DEFAULT_LANG,
     fields,
     buttons,
     actions,
