@@ -14,7 +14,9 @@ export const DEFAULT_SETTINGS = {
 
 export async function getSettings () {
   const { agentSettings } = await chrome.storage.local.get('agentSettings')
-  return { ...DEFAULT_SETTINGS, ...(agentSettings || {}) }
+  // 空字符串视为未设置（回退默认）：面板清空输入即恢复默认 endpoint/模型/自动探测邮箱
+  const clean = Object.fromEntries(Object.entries(agentSettings || {}).filter(([, v]) => v !== ''))
+  return { ...DEFAULT_SETTINGS, ...clean }
 }
 
 export function parseArgs (tc) {

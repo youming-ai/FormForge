@@ -564,7 +564,7 @@ function findNavButton (kind) {
     return s
   }
 
-  const matchingAll = allBtns.filter(b => nextish(b) && !SUBMIT_WORDS.test(norm(b)))
+  const matchingAll = allBtns.filter(b => nextish(b) && !isSubmitLabel(b.textContent || b.value))
   const cand = matchingAll.filter(b => !isBtnDisabled(b))
   const disabledCand = matchingAll.find(b => isBtnDisabled(b))
 
@@ -593,9 +593,9 @@ async function clickButton (target) {
     }
   }
   const label = (btn.textContent || btn.value || '').trim()
-  const normLabel = label.replace(/[\s\u00a0\u3000]+/g, '')
-  // 安全红线：最终提交类按钮绝不点击（双保险，确认页之外也要拦）
-  if (target !== 'back' && SUBMIT_WORDS.test(normLabel)) {
+  // 安全红线：最终提交类按钮绝不点击（双保险，确认页之外也要拦；
+  // 含导航词的如「登録して次へ」视为中间步骤，放行——isSubmitLabel 已处理）
+  if (target !== 'back' && isSubmitLabel(label)) {
     return { ok: false, result: `「${label}」疑似最终提交按钮，已硬拦截（安全红线：绝不提交）。若确是中间步骤按钮，请用 finish 说明留人工。` }
   }
 

@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: 富文本 + 送信按钮（非确认页）</title></head>
+<body>
+<h1>お問い合わせ内容の編集</h1>
+<!-- 只有 contenteditable 富文本可编辑 + 「送信」按钮：
+     修复前 isConfirm 只查 input/textarea/select → 误判为确认页；
+     修复后富文本算可编辑控件 → 非确认页 -->
+<div id="r-ed" contenteditable="true" aria-label="お問い合わせ内容"></div>
+<button type="button" id="r-send">送信</button>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

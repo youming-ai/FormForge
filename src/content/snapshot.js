@@ -8,6 +8,14 @@ let REFS = [] // [{ref, item, kind}]
 // 刻意不含「申請/次へ/確認/下一步/继续」等常见中间步骤词——宁可误拦（停下留人工）也不放过提交。
 const SUBMIT_WORDS = /申込|申込み|送信|登録|提出|決済|購入|注文|完了|submit|place order|order now|checkout|purchase|buy now|complete|register|sign up|create account|pay now|confirm order|提交|确认提交|立即购买|下单|支付|注册|完成|同意并提交|제출|등록|결제|구매|주문|완료|enviar|soumettre|absenden|bestellen|kaufen|bezahlen|confirmar|comprar|pagar/i
 
+// 中间步骤导航词：含这些词的按钮归 click_button 管，即使同时命中提交词表也不视为最终提交
+// （如「登録して次へ」是下一步不是最终提交；「確認画面へ」是去确认页）。导航优先，避免误拦中间步骤。
+const NEXT_WORDS = /次へ|次のステップ|確認画面へ|確認へ|進む|続ける|下一步|下一页|继续|next|continue|戻る|前へ|返回|上一步|back|prev/i
+// 空白归一（覆盖 Ant 2 字符自动插空格「次 へ」与全角空格）
+const normLabel = t => String(t || '').replace(/[\s\u00a0\u3000]+/g, '')
+// 最终提交判定唯一入口：命中提交词表 且 不含导航词
+const isSubmitLabel = t => { const n = normLabel(t); return SUBMIT_WORDS.test(n) && !NEXT_WORDS.test(n) }
+
 // —— 作用域：可见表单中控件最多的 → body ——
 function pickScope () {
   let best = null
@@ -20,14 +28,14 @@ function pickScope () {
 const scopeEl = () => pickScope()
 
 // —— 确认页判定 ——
-// 通用启发式：范围内没有可编辑控件 + 页面出现「最终提交」类按钮。
+// 通用启发式：范围内没有可编辑控件（含 contenteditable 富文本）+ 页面出现「最终提交」类按钮。
 const isConfirm = () => {
   const scope = scopeEl()
-  const editable = [...scope.querySelectorAll('input, textarea, select')]
+  const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')]
     .filter(el => visible(el) && !el.disabled && !['hidden', 'button', 'submit', 'reset', 'image', 'file'].includes(el.type || ''))
   if (editable.length) return false
   return [...document.querySelectorAll('button, input[type="submit"]')]
-    .some(b => visible(b) && !b.disabled && SUBMIT_WORDS.test((b.textContent || b.value || '').trim()))
+    .some(b => visible(b) && !b.disabled && isSubmitLabel(b.textContent || b.value))
 }
 
 const stepTitle = () =>
@@ -310,8 +318,7 @@ function buildSnapshot () {
   allNavElements.slice(0, 15).forEach(b => {
     const t = (b.textContent || b.value || '').trim()
     if (!t) return
-    const normText = t.replace(/[\s\u00a0\u3000]+/g, '')
-    const forbidden = SUBMIT_WORDS.test(normText)
+    const forbidden = isSubmitLabel(t)
     const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('ant-btn-disabled') || b.classList.contains('is-disabled')
     buttons.push({
       label: t,
@@ -322,16 +329,15 @@ function buildSnapshot () {
   })
 
   // 5) 步骤内其它可点按钮（如「住所自動入力」/「自动带入地址」），给 ref 供 click 使用
-  // 上限 20 个：复杂页面按钮再多也与填表无关，截断控制快照 token（与 buttons 的 15 个上限同理）
+  // 口径与 buttons 一致：原生 button + [role=button] + a 按钮；上限 20 个控制快照 token
   const actions = []
-  ;[...scope.querySelectorAll('button')].slice(0, 20).forEach(b => {
+  ;[...new Set(scope.querySelectorAll('button, [role="button"], a.ant-btn, a[role="button"]'))].slice(0, 20).forEach(b => {
     if (!visible(b) || b.disabled) return
-    const label = b.textContent.trim()
+    const label = (b.textContent || '').trim()
     if (!label) return
-    const normLabel = label.replace(/[\s\u00a0\u3000]+/g, '')
-    if (SUBMIT_WORDS.test(normLabel)) return // 最终提交类不进 actions，避免 click 误点
-    // 导航类按钮（次へ/戻る/確認画面へ）归属 click_button，不进 actions
-    if (/次へ|次へ進む|次のステップ|進む|続ける|確認画面へ|戻る|前へ/i.test(normLabel)) return
+    if (isSubmitLabel(label)) return // 最终提交类不进 actions，避免 click 误点
+    // 导航类按钮（次へ/戻る/確認画面へ…）归属 click_button，不进 actions
+    if (NEXT_WORDS.test(normLabel(label))) return
     const ref = 'e' + REFS.length
     REFS.push({ ref, item: b, kind: 'button' })
     actions.push({ ref, label })

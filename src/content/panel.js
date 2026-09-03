@@ -1,7 +1,6 @@
 // panel.js —— 浮窗控制面板（shadow DOM 隔离，不污染宿主页面）
-// HeroUI (NextUI) 现代化视觉风格 + Zima Blue（#0080ff）：
-// 亚克力毛玻璃、rounded-2xl、Zinc 灰阶、阴影拟态按钮、微动效。
-// 单按钮双态（開始/停止）、头部胶囊状态、场景输入自适应、设置自动保存。
+// Base UI 设计语言（无样式打底、功能优先）：1px 中性边框、全直角、无毛玻璃/无拟态阴影/无装饰动效。
+// 单按钮双态（開始/停止）、头部纯文本状态、场景输入自适应、设置自动保存。
 
 let ui = null
 
@@ -17,120 +16,83 @@ function createPanel () {
       * { box-sizing: border-box; }
       button, input, textarea { font: inherit; }
       .card {
-        width: min(336px, calc(100vw - 24px)); color: #18181b;
-        background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px) saturate(180%);
-        border: 1px solid rgba(228, 228, 231, 0.9); border-radius: 20px;
-        box-shadow: 0 16px 36px -6px rgba(0, 0, 0, 0.09), 0 0 1px rgba(0, 0, 0, 0.12);
-        overflow: hidden; font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
-        animation: panel-in .2s cubic-bezier(0.16, 1, 0.3, 1);
+        width: min(320px, calc(100vw - 24px)); color: #111827; background: #fff;
+        border: 1px solid #d4d4d8; box-shadow: 0 4px 16px rgba(0, 0, 0, .08);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Hiragino Sans", sans-serif;
       }
-      @keyframes panel-in { from { opacity: 0; transform: translateY(10px) scale(.98); } }
-
-      /* 头部：HeroUI CardHeader 风格 */
-      .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px;
-        border-bottom: 1px solid #f4f4f5; }
-      .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
-      .mark-box { width: 26px; height: 26px; border-radius: 8px; background: #0080ff;
-        display: flex; align-items: center; justify-content: center; flex: 0 0 auto;
-        box-shadow: 0 2px 8px rgba(0, 128, 255, 0.35); }
-      .mark { width: 14px; height: 14px; color: #fff; }
-      .name { font-size: 13.5px; font-weight: 700; color: #18181b; letter-spacing: -0.2px; }
-      .hd-right { display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-
-      /* HeroUI Chip 风格状态条 */
-      .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 9999px;
-        background: #f4f4f5; transition: all .2s; }
-      .card.running .chip { background: #ecfdf5; }
-      .state-dot { width: 6px; height: 6px; border-radius: 50%; background: #a1a1aa; flex: 0 0 auto; }
-      .card.running .state-dot { background: #10b981; animation: dot-pulse 1.2s ease-in-out infinite; }
-      @keyframes dot-pulse { 50% { opacity: .3; } }
-      .headstatus { color: #71717a; font-size: 11px; font-weight: 550; white-space: nowrap; }
+      .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        padding: 10px 12px; border-bottom: 1px solid #e4e4e7; }
+      .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+      .mark-box { width: 22px; height: 22px; background: #111827; color: #fff;
+        display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+      .mark { width: 12px; height: 12px; }
+      .name { font-size: 13px; font-weight: 600; }
+      .hd-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+      .status { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
+      .state-dot { width: 6px; height: 6px; background: #d4d4d8; flex: 0 0 auto; }
+      .card.running .state-dot { background: #059669; }
+      .headstatus { color: #71717a; font-size: 11px; white-space: nowrap; }
       .card.running .headstatus { color: #059669; }
-
-      .collapse { border: 0; background: transparent; width: 28px; height: 28px; cursor: pointer; color: #a1a1aa;
-        border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: all .15s; }
-      .collapse:hover { color: #18181b; background: #f4f4f5; }
-      .collapse svg { width: 14px; height: 14px; transition: transform .2s cubic-bezier(0.4, 0, 0.2, 1); }
+      .collapse { border: 0; background: transparent; width: 24px; height: 24px; cursor: pointer;
+        color: #71717a; display: flex; align-items: center; justify-content: center; }
+      .collapse:hover { color: #111827; background: #f4f4f5; }
+      .collapse svg { width: 12px; height: 12px; }
       .card.collapsed .collapse svg { transform: rotate(-90deg); }
-
-      .bd { max-height: calc(100vh - 90px); padding: 14px; overflow: auto;
-        scrollbar-width: thin; scrollbar-color: #e4e4e7 transparent; }
+      .bd { max-height: calc(100vh - 90px); padding: 12px; overflow: auto; }
       .bd.hidden { display: none; }
-
-      /* HeroUI Alert 风格提示 */
-      .warn { margin-bottom: 10px; padding: 8px 11px; color: #92400e; background: #fffbeb;
-        border: 1px solid #fef3c7; border-radius: 12px; font-size: 11px; line-height: 1.45; }
+      .warn { margin-bottom: 10px; padding: 7px 9px; color: #92400e; background: #fffbeb;
+        border: 1px solid #fde68a; font-size: 11px; line-height: 1.5; }
       .warn[hidden] { display: none; }
-
-      /* HeroUI Textarea & Input 风格 (Flat variant) */
-      textarea { width: 100%; color: #18181b; background: #f4f4f5; border: 2px solid transparent; border-radius: 12px;
-        padding: 9px 12px; outline: none; transition: background .15s, border-color .15s, box-shadow .15s; min-height: 40px;
-        max-height: 120px; resize: none; overflow: hidden; font-size: 12px; line-height: 1.4; }
-      textarea::placeholder, input::placeholder { color: #a1a1aa; font-size: 11.5px; }
-      textarea:hover, input[type="text"]:hover { background: #e4e4e7; }
-      textarea:focus, input[type="text"]:focus { background: #fff; border-color: #0080ff;
-        box-shadow: 0 0 0 3px rgba(0, 128, 255, 0.15); }
-
-      /* HeroUI Button (Shadow variant + Zima Blue) */
-      .btn { width: 100%; min-height: 38px; margin-top: 10px; border-radius: 12px; border: 0;
-        cursor: pointer; font-size: 13px; font-weight: 600; letter-spacing: -0.1px;
-        display: flex; align-items: center; justify-content: center; gap: 6px;
-        transition: transform .1s ease, filter .15s ease, box-shadow .15s ease; }
-      .btn:active { transform: scale(0.98); }
-      .btn.idle { color: #fff; background: #0080ff;
-        box-shadow: 0 4px 14px 0 rgba(0, 128, 255, 0.38); }
-      .btn.idle:hover { filter: brightness(1.06); }
-      .btn.stop { color: #fff; background: #f31260;
-        box-shadow: 0 4px 14px 0 rgba(243, 18, 96, 0.38); }
-      .btn.stop:hover { filter: brightness(1.06); }
-      .btn:disabled { cursor: not-allowed; opacity: .45; box-shadow: none; }
-
-      /* HeroUI Accordion (Light variant) */
-      details { margin-top: 12px; }
-      summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 4px 2px; cursor: pointer;
-        color: #71717a; font-size: 12px; font-weight: 600; user-select: none; transition: color .15s; }
+      textarea { width: 100%; color: #111827; background: #fff; border: 1px solid #d4d4d8;
+        padding: 7px 9px; outline: none; min-height: 34px; max-height: 120px;
+        resize: none; overflow: hidden; font-size: 12px; line-height: 1.5; }
+      textarea::placeholder, input::placeholder { color: #a1a1aa; }
+      textarea:hover, input[type="text"]:hover { border-color: #a1a1aa; }
+      textarea:focus, input[type="text"]:focus { border-color: #111827; }
+      .btn { width: 100%; min-height: 34px; margin-top: 10px; border: 1px solid transparent;
+        cursor: pointer; font-size: 13px; font-weight: 500; }
+      .btn.idle { color: #fff; background: #111827; }
+      .btn.idle:hover { background: #000; }
+      .btn.stop { color: #fff; background: #dc2626; }
+      .btn.stop:hover { background: #b91c1c; }
+      .btn:disabled { cursor: not-allowed; opacity: .4; }
+      details { margin-top: 10px; border-top: 1px solid #f4f4f5; }
+      summary { list-style: none; display: flex; align-items: center; gap: 6px; padding: 6px 0;
+        cursor: pointer; color: #52525b; font-size: 12px; user-select: none; }
       summary::-webkit-details-marker { display: none; }
-      summary:hover { color: #18181b; }
-      summary .chev { width: 10px; height: 10px; color: #a1a1aa; transition: transform .2s; }
+      summary:hover { color: #111827; }
+      summary .chev { width: 10px; height: 10px; color: #a1a1aa; }
       details[open] > summary .chev { transform: rotate(90deg); }
       summary .spacer { flex: 1; }
-      .mini { padding: 2px 7px; color: #71717a; background: #f4f4f5; border: 0; border-radius: 6px;
-        cursor: pointer; font-size: 11px; font-weight: 500; transition: all .15s; }
-      .mini:hover { color: #18181b; background: #e4e4e7; }
-      .settings-body { padding: 6px 0 2px; }
-      label.fl { display: block; margin: 10px 0 4px; color: #3f3f46; font-size: 11.5px; font-weight: 600; }
-      .hint { display: block; margin-top: 2px; color: #a1a1aa; font-size: 10.5px; font-weight: 400; }
-      input[type="text"] { width: 100%; color: #18181b; background: #f4f4f5; border: 2px solid transparent;
-        border-radius: 12px; padding: 8px 11px; outline: none; font-size: 12.5px;
-        transition: background .15s, border-color .15s, box-shadow .15s; }
+      .mini { padding: 0; color: #71717a; background: none; border: 0; cursor: pointer; font-size: 11px; }
+      .mini:hover { color: #111827; text-decoration: underline; }
+      .settings-body { padding: 2px 0 4px; }
+      label.fl { display: block; margin: 10px 0 4px; color: #52525b; font-size: 11px; font-weight: 600; }
+      .hint { display: block; margin-top: 2px; color: #a1a1aa; font-size: 10px; font-weight: 400; }
+      input[type="text"] { width: 100%; color: #111827; background: #fff; border: 1px solid #d4d4d8;
+        padding: 7px 9px; outline: none; font-size: 12px; }
       .file { width: 100%; color: #71717a; font-size: 11px; }
-      .file::file-selector-button { margin-right: 10px; padding: 6px 12px; color: #18181b; background: #e4e4e7;
-        border: 0; border-radius: 10px; cursor: pointer; font-size: 11px; font-weight: 600; transition: all .15s; }
-      .file::file-selector-button:hover { background: #d4d4d8; }
-      .upload-name { margin-top: 5px; color: #059669; font-size: 11px; word-break: break-all; font-weight: 500; }
-      .remove { color: #f31260; background: transparent; border: 0; cursor: pointer; font-size: 11px; padding: 0; margin-top: 4px; font-weight: 500; }
+      .file::file-selector-button { margin-right: 8px; padding: 5px 10px; color: #111827; background: #f4f4f5;
+        border: 1px solid #d4d4d8; cursor: pointer; font-size: 11px; }
+      .file::file-selector-button:hover { background: #e4e4e7; }
+      .upload-name { margin-top: 4px; color: #059669; font-size: 11px; word-break: break-all; }
+      .remove { color: #dc2626; background: transparent; border: 0; cursor: pointer; font-size: 11px; padding: 0; margin-top: 4px; }
       .remove:hover { text-decoration: underline; }
-
-      /* 日志区域 */
-      .log { min-height: 42px; max-height: 220px; overflow: auto; margin-top: 6px; color: #52525b;
-        background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 12px; padding: 8px 10px;
-        font: 11px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
-        scrollbar-width: thin; scrollbar-color: #d4d4d8 transparent; }
-      .log:empty::before { content: "ログはありません"; display: block; color: #a1a1aa; }
-      .log .l { padding: 1.5px 0; }
-      .c-assistant { color: #18181b; }
-      .c-tool { color: #0080ff; font-weight: 600; }
+      .log { min-height: 40px; max-height: 220px; overflow: auto; margin-top: 6px; color: #52525b;
+        background: #fafafa; border: 1px solid #e4e4e7; padding: 6px 8px;
+        font: 11px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+      .log:empty::before { content: "ログはありません"; display: block; color: #d4d4d8; }
+      .log .l { padding: 1px 0; }
+      .c-assistant { color: #111827; }
+      .c-tool { color: #1d4ed8; }
       .c-result { color: #71717a; }
-      .c-result.err, .c-error { color: #f31260; font-weight: 600; }
+      .c-result.err, .c-error { color: #dc2626; }
       .c-status { color: #a1a1aa; }
-      .c-done { color: #10b981; font-weight: 600; }
-
-      /* 页脚 */
-      .safeline { margin-top: 14px; color: #a1a1aa; font-size: 11px; text-align: center; display: flex;
-        align-items: center; justify-content: center; gap: 5px; font-weight: 450; }
-      .safeline svg { width: 12px; height: 12px; flex: 0 0 auto; color: #a1a1aa; }
+      .c-done { color: #059669; }
+      .safeline { margin-top: 12px; color: #a1a1aa; font-size: 10px; text-align: center; display: flex;
+        align-items: center; justify-content: center; gap: 4px; }
+      .safeline svg { width: 11px; height: 11px; flex: 0 0 auto; }
       [hidden] { display: none !important; }
-      @media (prefers-reduced-motion: reduce) { .card { animation: none; } .state-dot { animation: none !important; } }
     </style>
     <div class="card" id="card">
       <header class="hd">
@@ -141,7 +103,7 @@ function createPanel () {
           <span class="name">FormForge</span>
         </div>
         <div class="hd-right">
-          <span class="chip"><span class="state-dot" id="statedot"></span><span class="headstatus" id="headstatus">待機中</span></span>
+          <span class="status"><span class="state-dot" id="statedot"></span><span class="headstatus" id="headstatus">待機中</span></span>
           <button class="collapse" id="collapse" type="button" title="パネルを折りたたむ" aria-label="パネルを折りたたむ" aria-expanded="true">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
           </button>
@@ -244,12 +206,12 @@ async function mergeSettings (patch) {
 }
 
 function saveCfg (silent) {
-  const patch = {}
-  const ep = ui.endpoint.value.trim()
-  const md = ui.model.value.trim() || 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M'
-  if (ep) patch.endpoint = ep
-  if (md) patch.model = md
-  patch.baseEmail = ui.baseemail.value.trim()
+  // 三项直写（含空字符串）：getSettings 会把空串过滤回退默认，清空输入 = 恢复默认
+  const patch = {
+    endpoint: ui.endpoint.value.trim(),
+    model: ui.model.value.trim(),
+    baseEmail: ui.baseemail.value.trim(),
+  }
   mergeSettings(patch).then(() => {
     if (silent) {
       if (ui.savedtip) {

@@ -1,6 +1,6 @@
 // index.js —— background 入口（service worker, module）
 // 跑 OpenAI 兼容(LM Studio/llama.cpp)的工具调用循环，驱动 content 执行 DOM 操作
-// 同一轮的多个 tool_calls 并行下发执行（互不依赖的 DOM 操作同时进行，select 在 content 侧自动排队）
+// 同一批 tool_calls 分阶段执行：get_form 先行 → read_options 并行 → 写入类并行 → click_button 串行收尾
 import { TOOLS } from './tools.js'
 import { buildSystemPrompt } from './system-prompt.js'
 import { getSettings, resolveModel, callLLM, parseArgs, toResultString, briefInput } from './llm.js'
@@ -13,6 +13,14 @@ const MAX_KEPT_MESSAGES = 40
 
 const aborted = new Set()
 const running = new Set()
+// 工具执行阶段：0 快照先行 → 1 读选项 → 2 写入类并行 → 3 导航串行收尾。
+// click_button 必须在所有写入落定后执行，否则「下一步」会在值写入前触发，导致步骤推进与校验错乱。
+export function toolPhase (name) {
+  if (name === 'get_form') return 0
+  if (name === 'read_options') return 1
+  if (name === 'click_button') return 3
+  return 2
+}
 // 每个 tab 正在运行任务的请求中止控制器：用户「停止」时实时中断 in-flight LLM 请求
 const controllers = new Map()
 
@@ -83,21 +91,26 @@ async function runAgent (tabId, scenario, baseEmail) {
         break
       }
 
-      // 先按序打日志，再执行同一批工具调用。
-      // get_form 单独先跑：快照反映「本批开始时」的状态，语义一致（同步 buildSnapshot，很快）。
+      // 先按序打日志，再分阶段执行同一批工具调用。
+      // get_form 阶段 0 先跑：快照反映「本批开始时」的状态，语义一致（同步 buildSnapshot，很快）。
       for (const tc of toolCalls) log(tabId, 'tool', `${tc.function?.name} ${briefInput(parseArgs(tc))}`)
 
       const execTc = tc => chrome.tabs.sendMessage(tabId, { type: 'agent:exec', name: tc.function?.name, input: parseArgs(tc) })
         .catch(err => ({ ok: false, result: `与页面通信失败：${err?.message || err}` }))
 
-      const getFormIdx = toolCalls.findIndex(tc => tc.function?.name === 'get_form')
+      // 分阶段执行：同批内按阶段排序（稳定排序保持原相对顺序），读→写并行、导航串行收尾
+      const phaseOf = i => toolPhase(toolCalls[i].function?.name)
+      const order = toolCalls.map((_, i) => i)
+        .sort((a, b) => phaseOf(a) - phaseOf(b))
       let results = []
-      if (getFormIdx !== -1) results[getFormIdx] = await execTc(toolCalls[getFormIdx])
-      // 其余工具并行执行：总耗时从「求和」变为「取最大」
-      await Promise.all(toolCalls.map(async (tc, i) => {
-        if (i === getFormIdx) return
-        results[i] = await execTc(tc)
-      }))
+      for (const phase of [0, 1, 2]) {
+        await Promise.all(order
+          .filter(i => phaseOf(i) === phase)
+          .map(async i => { results[i] = await execTc(toolCalls[i]) }))
+      }
+      for (const i of order.filter(i => phaseOf(i) === 3)) {
+        results[i] = await execTc(toolCalls[i])
+      }
 
       for (let i = 0; i < toolCalls.length; i++) {
         const tc = toolCalls[i]

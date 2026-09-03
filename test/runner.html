@@ -323,6 +323,61 @@ window.chrome = {
   assert(/禁用|disabled/.test(rDis.result), 'E3b 明确提示「次へ」当前处于禁用状态，不要直接 finish', rDis.result)
   disBtnHolder.remove()
 
+  // ===== F. 全量优化回归（isSubmitLabel / actions 口径 / 富文本 / 多选 / lang）=====
+  out.push('<div class="section">F. 提交判定与覆盖回归</div>')
+  eq(isSubmitLabel('登録して次へ'), false, 'F1 「登録して次へ」导航优先→非提交')
+  eq(isSubmitLabel('次 へ'), false, 'F2 含空格「次 へ」→非提交')
+  eq(isSubmitLabel('確認画面へ'), false, 'F3 「確認画面へ」→非提交')
+  eq(isSubmitLabel('登録する'), true, 'F4 「登録する」仍拦截')
+  eq(isSubmitLabel('申込む'), true, 'F5 「申込む」仍拦截')
+  eq(isSubmitLabel('送信'), true, 'F6 「送信」仍拦截')
+  eq(isSubmitLabel('Submit'), true, 'F7 「Submit」仍拦截')
+
+  // F8: lang 检测（runner.html 自带 lang=ja）
+  eq(buildSnapshot().lang, 'ja', 'F8 html[lang=ja] → lang=ja')
+
+  // F9: [role=button] 进入 actions（与 buttons 同口径）
+  const roleBtn = document.createElement('div')
+  roleBtn.setAttribute('role', 'button')
+  roleBtn.textContent = '住所自動入力'
+  document.getElementById('main-form').appendChild(roleBtn)
+  assert(buildSnapshot().actions.some(a => a.label === '住所自動入力'), 'F9 div[role=button] 进入 actions')
+  roleBtn.remove()
+
+  // F10: Ant 多选下拉打 multiple 标记
+  const multi = document.createElement('div')
+  multi.className = 'ant-form-item'
+  multi.innerHTML = '<div class="ant-form-item-label"><label>興味分野</label></div><div class="ant-select ant-select-multiple"><div class="ant-select-selector"></div></div>'
+  document.getElementById('main-form').appendChild(multi)
+  const multiF = buildSnapshot().fields.find(f => f.label === '興味分野')
+  assert(multiF && multiF.kind === 'select' && multiF.multiple === true, 'F10 Ant 多选下拉 multiple=true')
+  multi.remove()
+
+  // F11: 富文本字段进快照 + fill_text 真实写入
+  const rtWrap = document.createElement('div')
+  rtWrap.className = 'field'
+  rtWrap.innerHTML = '<span>備考</span><div id="t-rt" contenteditable="true"></div>'
+  document.getElementById('main-form').appendChild(rtWrap)
+  const rtF = buildSnapshot().fields.find(f => f.kind === 'richtext')
+  assert(rtF, 'F11 富文本字段进快照')
+  if (rtF) {
+    const rRt = await execTool('fill_text', { ref: rtF.ref, value: 'テスト備考' })
+    eq(rRt.ok, true, 'F11b 富文本 fill ok')
+    eq(document.getElementById('t-rt').textContent, 'テスト備考', 'F11c 富文本内容已写入')
+  }
+  rtWrap.remove()
+
+  // F12: 纯富文本 + 送信按钮 → 非确认页（修复前 isConfirm 只查 input/select/textarea 会误判 true）
+  const c4 = await probe('fixtures-rich.html', async w => {
+    w.eval('(async () => { try { const snap = buildSnapshot(); const f = snap.fields.find(x => x.kind === "richtext"); let fillOk = false, text = ""; if (f) { const r = await execTool("fill_text", { ref: f.ref, value: "問い合わせテスト" }); fillOk = r.ok; text = document.getElementById("r-ed").textContent } window.__r = JSON.stringify({ conf: isConfirm(), hasRt: !!f, fillOk, text }) } catch (e) { window.__r = JSON.stringify({ err: String((e && e.message) || e) }) } })()')
+    return JSON.parse(await waitR(w))
+  })
+  eq(c4.err, undefined, 'F12 iframe 内无异常', JSON.stringify(c4))
+  eq(c4.conf, false, 'F12b 纯富文本+送信按钮 → 非确认页')
+  eq(c4.hasRt, true, 'F12c 富文本进快照')
+  eq(c4.fillOk, true, 'F12d 富文本可填')
+  eq(c4.text, '問い合わせテスト', 'F12e 富文本值落盘')
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`
