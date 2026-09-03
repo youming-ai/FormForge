@@ -250,6 +250,12 @@ window.chrome = {
 
   // ===== C. 确认页/中间页（iframe 加载同源 fixture，各自含模块）=====
   out.push('<div class="section">C. 确认页判定与拦截</div>')
+  // 等 iframe 内 eval 异步任务写入 window.__r（轮询，消除虚拟时间下的定时竞态）
+  const waitR = async (w) => {
+    const t0 = Date.now()
+    while (w.__r === undefined && Date.now() - t0 < 8000) await new Promise(r => setTimeout(r, 100))
+    return w.__r
+  }
   const probe = async (page, fn) => {
     const ifr = document.createElement('iframe')
     ifr.src = page
@@ -264,8 +270,7 @@ window.chrome = {
   // iframe 里模块用 const 声明（不挂 window），须用 w.eval 在其环境求值
   const c1 = await probe('fixtures-confirm.html', async w => {
     w.eval('(async () => { const v = { conf: isConfirm(), blocked: await execTool("click_button", { target: "next" }) }; window.__r = JSON.stringify(v) })()')
-    await new Promise(res => setTimeout(res, 3000))
-    return JSON.parse(w.__r)
+    return JSON.parse(await waitR(w))
   })
   eq(c1.conf, true, 'C1 确认页判定（无可编辑控件+申込む）')
   eq(c1.blocked.ok, false, 'C2 确认页 click_button 被拦截')
@@ -273,8 +278,7 @@ window.chrome = {
 
   const c2 = await probe('fixtures-step.html', async w => {
     w.eval('(async () => { const v = { conf: isConfirm(), res: await execTool("click_button", { target: "next" }) }; window.__r = JSON.stringify(v) })()')
-    await new Promise(res => setTimeout(res, 3000))
-    const r = JSON.parse(w.__r)
+    const r = JSON.parse(await waitR(w))
     return { conf: r.conf, ok: r.res.ok, result: r.res.result }
   })
   eq(c2.conf, false, 'C3 中间步骤页非确认')
@@ -283,8 +287,7 @@ window.chrome = {
   // D1b: fixed 弹窗表单页（页面唯一 form）——字段进快照 + 提交词拦截
   const c3 = await probe('fixtures-fixed.html', async w => {
     w.eval('(async () => { const snap = buildSnapshot(); const email = snap.fields.find(f => (f.label||"").includes("メールアドレス")); const pass = snap.fields.find(f => (f.label||"").includes("パスワード")); const blocked = await execTool("click_button", { target: "next" }); window.__r = JSON.stringify({ emailOk: !!(email && email.kind === "text" && email.required), passOk: !!(pass && pass.kind === "text"), blocked }) })()')
-    await new Promise(res => setTimeout(res, 3000))
-    return JSON.parse(w.__r)
+    return JSON.parse(await waitR(w))
   })
   eq(c3.emailOk, true, 'D1b fixed 弹窗字段进快照（email required）')
   eq(c3.passOk, true, 'D1b fixed 弹窗字段进快照（password）')

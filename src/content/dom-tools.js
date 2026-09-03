@@ -469,14 +469,8 @@ async function setDate (ref, y, m, d) {
   return { ok: false, result: `日期可能未生效（目标 ${y}/${pad2(m)}/${pad2(d)}，当前框内「${got || '空'}」）。该选择器或不可键入；先 get_form 复核，若多次仍失败请在 finish 里标注此字段需人工。` }
 }
 
-// 找导航按钮：elepay 专属区优先，通用兜底（按文案/类型/样式评分，排除最终提交词）
+// 找导航按钮：按文案/类型/样式评分，排除最终提交词（通用）
 function findNavButton (kind) {
-  const action = document.querySelector('.merchant-apply-info__action')
-  if (action) {
-    const b = kind === 'back' ? action.querySelector('button.ant-btn-default') : action.querySelector('button.ant-btn-primary')
-    if (b && !b.disabled) return b
-    return null
-  }
   const scope = scopeEl()
   const btns = [...scope.querySelectorAll('button, input[type="submit"]'), ...document.querySelectorAll('button[type="submit"], input[type="submit"]')]
     .filter(b => visible(b) && !b.disabled)

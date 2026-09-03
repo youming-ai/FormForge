@@ -58,7 +58,7 @@ async function runAgent (tabId, scenario, baseEmail) {
 
     let messages = [
       { role: 'system', content: buildSystemPrompt({ baseEmail: userEmail }) },
-      { role: 'user', content: `场景：${scenario || '一个常见的日本加盟店申请（个人事业主 / 单店 / 餐饮）'}\n\n现在开始：先调用 get_form 查看第一步表单。` },
+      { role: 'user', content: `场景：${scenario || '一个常见的网页注册/申请表单'}\n\n现在开始：先调用 get_form 查看第一步表单。` },
     ]
 
     log(tabId, 'status', `开始（模型 ${model}）`)

@@ -1,7 +1,5 @@
 // snapshot.js —— 「眼」：get_form 表单快照与 ref 管理（通用表单扫描）
-// 分层适配：① Ant Design 字段（elepay legacy ApplyForm 及任何 Ant 页面优先）
-//          ② 料金プラン类可点卡片（elepay）
-//          ③ 原生 HTML 控件兜底（任意网页表单：label/fieldset/原生 input/select/textarea）
+// 分层适配：① Ant Design 字段优先 ② 可点卡片(plan-select) ③ 原生 HTML 控件兜底（任意网页表单：label/fieldset/原生 input/select/textarea）
 // 每次 buildSnapshot 重建 REFS（ref → {item, kind}），供 dom-tools 按 ref 操作。
 
 let REFS = [] // [{ref, item, kind}]
@@ -10,10 +8,8 @@ let REFS = [] // [{ref, item, kind}]
 // 宁可误拦（停下留人工）也不放过提交。
 const SUBMIT_WORDS = /申込|申込み|送信|登録|提出|決済|購入|注文|完了|submit|place order|order now|checkout|purchase|buy now|complete/i
 
-// —— 作用域：elepay 专属 → 可见表单中控件最多的 → body ——
+// —— 作用域：可见表单中控件最多的 → body ——
 function pickScope () {
-  const elepay = document.querySelector('.merchant-apply-info__content') || document.querySelector('.merchant-apply-info')
-  if (elepay && elepay.querySelector('.ant-form-item, input, select, textarea')) return elepay
   let best = null
   for (const f of [...document.querySelectorAll('form')].filter(visible)) {
     const n = f.querySelectorAll('input:not([type="hidden"]), select, textarea').length
@@ -24,9 +20,8 @@ function pickScope () {
 const scopeEl = () => pickScope()
 
 // —— 确认页判定 ——
-// elepay 专属标记优先；通用启发式：范围内没有可编辑控件 + 页面出现「最终提交」类按钮。
+// 通用启发式：范围内没有可编辑控件 + 页面出现「最终提交」类按钮。
 const isConfirm = () => {
-  if (document.querySelector('.merchant-apply-info__section')) return true
   const scope = scopeEl()
   const editable = [...scope.querySelectorAll('input, textarea, select')]
     .filter(el => visible(el) && !el.disabled && !['hidden', 'button', 'submit', 'reset', 'image', 'file'].includes(el.type || ''))
@@ -36,7 +31,6 @@ const isConfirm = () => {
 }
 
 const stepTitle = () =>
-  (document.querySelector('.merchant-apply-info__title')?.textContent || '').trim() ||
   (document.querySelector('.ant-steps-item-active .ant-steps-item-title')?.textContent || '').trim() ||
   (document.querySelector('h1, h2')?.textContent || '').trim()
 
@@ -202,7 +196,7 @@ function buildSnapshot () {
   const fields = []
   const covered = [] // 已被 Ant/卡片路径覆盖的元素（原生扫描跳过其中控件）
 
-  // 1) Ant 表单字段（elepay legacy ApplyForm 及任何 Ant 页面）
+  // 1) Ant 表单字段（.ant-form-item）
   const items = [...scope.querySelectorAll('.ant-form-item')].filter(visible)
   for (const item of items) {
     if (item.querySelector('.ant-form-item')) continue // 跳过含嵌套子项的父容器
@@ -221,7 +215,7 @@ function buildSnapshot () {
     fields.push(f)
   }
 
-  // 2) 料金プラン等可点卡片(.plan-select)
+  // 2) 可点卡片(.plan-select, 站点自定义方案选择)
   scope.querySelectorAll('.plan-select').forEach(planRoot => {
     if (!visible(planRoot)) return
     covered.push(planRoot)
@@ -236,7 +230,7 @@ function buildSnapshot () {
       value: active ? titleOf(active) : '',
       filled: !!active,
       ...(active ? {} : { options: cards.map(titleOf) }), // 已选中的卡片不必再给选项列表，省 token
-      required: true, // 卡片组通常必填（elepay 料金プラン即如此）；若目标站点非必填，跳过即可
+      required: true, // 卡片组通常必填；若目标站点非必填，模型看到 filled 会跳
     })
   })
 
@@ -263,39 +257,27 @@ function buildSnapshot () {
     fields.push(f)
   }
 
-  // 4) 导航按钮（elepay 专属区优先；通用：submit/primary 类按钮，标注最终提交类为禁止）
-  const action = document.querySelector('.merchant-apply-info__action')
+  // 4) 导航按钮（通用：submit/primary 类按钮，标注最终提交类为禁止）
   const buttons = []
-  if (action) {
-    action.querySelectorAll('button').forEach(b => {
-      if (!visible(b)) return
-      buttons.push({
-        label: b.textContent.trim(),
-        kind: b.classList.contains('ant-btn-primary') ? 'primary' : 'default',
-        disabled: b.disabled,
-      })
+  ;[...scope.querySelectorAll('button, input[type="submit"]')].filter(visible).filter(b => !b.disabled).slice(0, 10).forEach(b => {
+    const t = (b.textContent || b.value || '').trim()
+    if (!t) return
+    const forbidden = SUBMIT_WORDS.test(t)
+    buttons.push({
+      label: t,
+      kind: forbidden ? 'submit' : ((b.type === 'submit' || /primary|main/i.test(b.className)) ? 'primary' : 'default'),
+      disabled: b.disabled,
+      forbidden, // 最终提交类：点击会被硬拦截
     })
-  } else {
-    ;[...scope.querySelectorAll('button, input[type="submit"]')].filter(visible).filter(b => !b.disabled).slice(0, 10).forEach(b => {
-      const t = (b.textContent || b.value || '').trim()
-      if (!t) return
-      const forbidden = SUBMIT_WORDS.test(t)
-      buttons.push({
-        label: t,
-        kind: forbidden ? 'submit' : ((b.type === 'submit' || /primary|main/i.test(b.className)) ? 'primary' : 'default'),
-        disabled: b.disabled,
-        forbidden, // 最终提交类：点击会被硬拦截
-      })
-    })
-  }
+  })
 
   // 5) 步骤内其它可点按钮（如「住所自動入力」/「自动带入地址」），给 ref 供 click 使用
   const actions = []
   scope.querySelectorAll('button').forEach(b => {
     if (!visible(b) || b.disabled) return
-    if (action && action.contains(b)) return
     const label = b.textContent.trim()
     if (!label) return
+    if (SUBMIT_WORDS.test(label)) return // 最终提交类不进 actions，避免 click 误点
     const ref = 'e' + REFS.length
     REFS.push({ ref, item: b, kind: 'button' })
     actions.push({ ref, label })
