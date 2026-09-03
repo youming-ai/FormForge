@@ -4,7 +4,7 @@
 
 ## 架构
 
-- **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同批 tool_calls 分阶段执行**（`toolPhase`：get_form 先行 → read_options 并行 → 写入类并行 → click_button 串行收尾，防「填完前就下一步」竞态；select 在 content 侧自动排队）；MAX_TURNS=120，耗尽时明确提示。
+- **大脑** `src/background/`（service worker, module）：`index.js` 跑 OpenAI 兼容工具调用循环（`tools` + `tool_calls`，无云端）；`llm.js` 推理服务客户端（设置、5 分钟超时 AbortController、`cache_prompt:true`、`auto` 模型解析）；原样追加 assistant 消息保留 tool_calls，`{role:'tool',tool_call_id,content}` 回传结果，循环到无 tool_calls。**同批 tool_calls 分阶段执行**（`toolPhase`：get_form 先行 → read_options 并行 → 写入类并行 → click/click_button 串行收尾，防「填完/点完前就推进」竞态；select 在 content 侧自动排队）；MAX_TURNS=120，耗尽时明确提示。
 - **手** `src/content/dom-tools.js`：DOM 工具执行器，含 select 互斥锁与字段专属下拉定位（aria-owns）。**等待全部自适应**（`waitFor` 轮询早退，替代固定 sleep）：下拉出现即读、checkbox/radio 到位即返、上传等项落列表且结束 uploading 即返（上限 12s）、「自动带入地址」等异步按钮轮询表单值变化（最多 3s）。`utils.js`（通用工具）/`snapshot.js`（快照+ref）/`panel.js`（浮窗 UI）/`main.js`（消息总线）由 manifest `content_scripts.js` **按序注入共享同一隔离环境**（零构建，不能 import/export）。
 - **眼** `src/content/snapshot.js` 的 `buildSnapshot`：把当前步骤快照、真实下拉选项喂回模型。已填的 radio/cards 不再带 options 列表省 token。**纯 DOM 方案**：get_form 只回文本快照；自定义组件下拉的选项靠 `read_options` 打开下拉读取（`activeDropdown` 修复了读错浮层节点、openSelect 聚焦触发异步加载）。曾试过截图识图（image_url 多模态），因每轮吃 1~2K 视觉 token + 稠密模型太慢而回退。
 - `tools.js` 工具定义（OpenAI function 格式）；`system-prompt.js` agent 指令 + 通用格式指南。
@@ -18,8 +18,8 @@
 
 ## 目标表单的 DOM 现实（踩坑知识，改 content.js 前必读）
 
-- **作用域**：Ant 表单字段用 `.ant-form-item` 扫描取叶子（`!querySelector('.ant-form-item')`）；通用兜底扫原生 `input/select/textarea`。每字段给 `ref/kind/label/value/required/filled/error`。kind: text/number/textarea/select/radio/checkbox/switch/date/upload/cards/richtext/unknown。
-- **确认页判定**：范围内没有可编辑控件（含 contenteditable 富文本）+ 页面出现「最终提交」类按钮（`SUBMIT_WORDS` 词表，唯一入口 `isSubmitLabel`：含导航词如「登録して次へ」时导航优先、不视为提交）→ 视为确认页。`click_button` 在确认页**硬拦截**，只允许 `finish`，绝不提交。
+- **作用域**：Ant 表单字段用 `.ant-form-item` 扫描取叶子（`!querySelector('.ant-form-item')`）；通用兜底扫原生 `input/select/textarea` + 开关 button（`button[role=switch]/button.ant-switch`，裸开关以自身为单元）。超大表单字段明细截断 80（missingRequired 全量不受影响）。每字段给 `ref/kind/label/value/required/filled/error`。kind: text/number/textarea/select/radio/checkbox/switch/date/upload/cards/richtext/unknown。
+- **确认页判定**：范围内没有可编辑控件（含 contenteditable 富文本与开关 button）+ 页面出现「最终提交」类按钮（`SUBMIT_WORDS` 词表，唯一入口 `isSubmitLabel`：含导航词如「登録して次へ」时导航优先、不视为提交）→ 视为确认页。`click_button` 在确认页**硬拦截**，只允许 `finish`，绝不提交。
 - **字段扫描**：Ant 的 `.ant-form-item`（含地址组等子字段无 label 只有 placeholder）或原生（label-for / label 包裹 / fieldset+legend / aria-label / placeholder 五级标签兜底）。必填查 `required` 属性 / aria-required / Ant 的 `.ant-form-item-required`。
 - **日期选择器**：Ant `a-date-picker`（键入完整日期 + Enter + blur 回读校验）或原生 `input[type=date]`（直接设 `YYYY-MM-DD`）。
 - **动态下拉**（选项接口动态返回）：模型猜不到 → 默认 `choose_option(ref,"first")` 选第一个可用项（校验通常只要求非空，最稳最快）；需要特定值时才 `read_options`（开 dropdown 读选项，读的是 `activeDropdown`——aria-owns 节点没选项时退回可见浮层）。**联动/级联下拉必须分轮选**（先选上级、下一轮确认下级选项带出后再选），不能同批并行。

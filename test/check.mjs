@@ -30,14 +30,14 @@ try {
   fail++
   console.log(`FAIL buildSystemPrompt: ${e.message}`)
 }
-// 分阶段执行：get_form 先行 → 读选项 → 写入 → click_button 串行收尾（防导航竞态）
+// 分阶段执行：get_form 先行 → 读选项 → 写入 → click/click_button 串行收尾（防动作竞态）
 try {
   const bg = await import(pathToFileURL(resolve('src/background/index.js')))
-  const want = { get_form: 0, read_options: 1, fill_text: 2, choose_option: 2, set_date: 2, upload_file: 2, click: 2, finish: 2, click_button: 3, unknown_tool: 2 }
+  const want = { get_form: 0, read_options: 1, fill_text: 2, choose_option: 2, set_date: 2, upload_file: 2, finish: 2, click: 3, click_button: 3, unknown_tool: 2 }
   for (const [n, w] of Object.entries(want)) {
     if (bg.toolPhase(n) !== w) throw new Error(`toolPhase(${n})=${bg.toolPhase(n)} want=${w}`)
   }
-  console.log('OK  toolPhase 分阶段（click_button=3 收尾串行）')
+  console.log('OK  toolPhase 分阶段（click/click_button=3 收尾串行）')
 } catch (e) {
   fail++
   console.log(`FAIL toolPhase: ${e.message}`)

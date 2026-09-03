@@ -441,14 +441,55 @@ window.chrome = {
   const swNatF = buildSnapshot().fields.find(f => (f.label || '').includes('原生开关'))
   assert(swNatF && swNatF.kind === 'checkbox', 'G4 原生 role=switch checkbox 仍为 checkbox')
   swNat.remove()
-
   // ===== G5. 日期候选纯函数（含日文年月日）=====
+  out.push('<div class="section">G5. dateCandidates 日期格式推断</div>')
   out.push('<div class="section">G5. dateCandidates 日期格式推断</div>')
   eq(dateCandidates('YYYY年MM月DD日', 2024, 4, 5).candidates[0], '2024年04月05日', 'G5 日文 placeholder 首选年月日')
   eq(dateCandidates('YYYY/MM/DD', 2024, 4, 5).candidates[0], '2024/4/5', 'G5b 斜杠年优先')
   eq(dateCandidates('MM/DD/YYYY', 2024, 4, 5).candidates[0], '4/5/2024', 'G5c 美式月优先')
   eq(dateCandidates('DD/MM/YYYY', 2024, 4, 5).candidates[0], '5/4/2024', 'G5d 欧式日优先')
   eq(dateCandidates('', 2024, 4, 5).candidates[0], '2024/4/5', 'G5e 空 placeholder 默认年优先')
+
+  // ===== G7. 裸开关 button 进原生扫描（label 包裹，非 Ant 表单）=====
+  out.push('<div class="section">G7. 裸开关与超大表单</div>')
+  const swBare = document.createElement('label')
+  swBare.innerHTML = '通知开关<button type="button" class="ant-switch" role="switch" aria-checked="false"></button>'
+  document.getElementById('main-form').appendChild(swBare)
+  const swBareBtn = swBare.querySelector('.ant-switch')
+  swBareBtn.addEventListener('click', () => {
+    const on = swBareBtn.classList.toggle('ant-switch-checked')
+    swBareBtn.setAttribute('aria-checked', String(on))
+  })
+  const swBareF = buildSnapshot().fields.find(f => f.label === '通知开关')
+  assert(swBareF && swBareF.kind === 'switch', 'G7 裸开关 button 进快照为 switch', JSON.stringify(swBareF))
+  if (swBareF) {
+    eq((await execTool('choose_option', { ref: swBareF.ref, option: 'on' })).ok, true, 'G7b 裸开关可打开')
+    eq(swBareBtn.classList.contains('ant-switch-checked'), true, 'G7c 状态已翻转')
+  }
+  swBare.remove()
+
+  // ===== G8. 超大表单截断（明细 80，上限外仍进 missingRequired）=====
+  const bigBox = document.createElement('div')
+  let bigHtml = ''
+  for (let i = 0; i < 85; i++) bigHtml += `<div class="field"><label>追加${i}<input type="text"${i < 3 ? ' required' : ''}></label></div>`
+  bigBox.innerHTML = bigHtml
+  document.getElementById('main-form').appendChild(bigBox)
+  const bigSnap = buildSnapshot()
+  eq(bigSnap.fields.length, 80, 'G8 字段明细截断到 80')
+  eq(bigSnap.totalFields, 96, 'G8b totalFields=96（11+85）')
+  eq(bigSnap.truncatedFields, 16, 'G8c truncatedFields=16')
+  assert(bigSnap.missingRequired.some(s => s.includes('追加')), 'G8d 被截断的必填仍进 missingRequired')
+  bigBox.remove()
+
+  // ===== G9. 纯开关 + 送信按钮 → 非确认页（iframe）=====
+  const c5 = await probe('fixtures-switch.html', async w => {
+    w.eval('(async () => { try { const snap = buildSnapshot(); window.__r = JSON.stringify({ conf: isConfirm(), hasSw: snap.fields.some(x => x.kind === "switch"), sendForbidden: !!(snap.buttons.find(b => b.label === "送信") || {}).forbidden }) } catch (e) { window.__r = JSON.stringify({ err: String((e && e.message) || e) }) } })()')
+    return JSON.parse(await waitR(w))
+  })
+  eq(c5.err, undefined, 'G9 iframe 内无异常', JSON.stringify(c5))
+  eq(c5.conf, false, 'G9b 纯开关+送信按钮 → 非确认页（修复前误判 true）')
+  eq(c5.hasSw, true, 'G9c 裸开关进快照')
+  eq(c5.sendForbidden, true, 'G9d 送信仍标 forbidden')
 
   // G6: 语言检测不到时默认日文（目标表单以日文为主）
   eq(detectLang(document.implementation.createHTMLDocument('')), '', 'G6 空文档检测不到语言')

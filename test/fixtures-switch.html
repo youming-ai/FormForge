@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: 纯开关 + 送信按钮（非确认页）</title></head>
+<body>
+<h1>通知設定</h1>
+<!-- 只有开关可操作 + 「送信」按钮：
+     修复前 isConfirm 只查 input/textarea/select → 误判为确认页；
+     修复后开关算可编辑控件 → 非确认页 -->
+<button type="button" class="ant-switch" role="switch" aria-checked="false"><span class="ant-switch-inner"></span></button>
+<button type="button" id="s-send">送信</button>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

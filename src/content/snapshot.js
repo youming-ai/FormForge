@@ -35,6 +35,10 @@ const isConfirm = () => {
   const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')]
     .filter(el => visible(el) && !el.disabled && !['hidden', 'button', 'submit', 'reset', 'image', 'file'].includes(el.type || ''))
   if (editable.length) return false
+  // 开关是 button 元素（无 input 子元素）：纯开关步骤 + 提交词按钮不能误判为确认页
+  const hasSwitch = [...scope.querySelectorAll('button[role="switch"], button.ant-switch')]
+    .some(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true')
+  if (hasSwitch) return false
   return [...document.querySelectorAll('button, input[type="submit"]')]
     .some(b => visible(b) && !b.disabled && isSubmitLabel(b.textContent || b.value))
 }
@@ -183,9 +187,10 @@ const checkboxOptionsOf = item => {
 // 原生控件 → 字段单元：radio/checkbox 尝试按 name 在组容器（fieldset/[role]/ul/table）内聚合；
 // 其余取最近 label 或父元素为单元。已被 Ant 路径覆盖的控件跳过。
 function nativeFieldUnits (scope, covered) {
-  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""]')]
+  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""], button[role="switch"], button.ant-switch')]
     .filter(el => visible(el) && !el.disabled)
-    .filter(el => !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
+    // type 黑名单只对 input 生效：button 的 type 默认 submit，不能沿用 input 语义过滤
+    .filter(el => el.tagName !== 'INPUT' || !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
     .filter(el => !covered.some(c => c.contains(el)))
     .filter(el => !el.closest('.ant-select, .ant-picker, .ant-upload'))
   const units = []
@@ -202,6 +207,10 @@ function nativeFieldUnits (scope, covered) {
       if (grp && [...grp.querySelectorAll(`input[type="${el.type}"]`)].filter(i => !i.disabled).length > 1) {
         box = grp
       } else box = el.closest('label') || el.parentElement
+    } else if (el.tagName === 'BUTTON') {
+      // 开关 button：父级若是 form 级大容器则以自身为单元，避免把整个 form 当成一个字段
+      const parent = el.closest('label') || el.parentElement
+      box = (parent && parent.matches('form, body, main, [role="main"], table')) ? el : parent
     } else {
       box = el.closest('label') || el.parentElement
     }
@@ -359,8 +368,18 @@ function buildSnapshot () {
   })
 
   const missingRequired = fields
-    .filter(f => f.required && !String(f.value || '').trim())
+    .filter(f => f.required && !f.filled)
     .map(f => `${f.ref}:${f.label || '(无标签)'}`)
+
+  // 超大表单保护：字段明细只给前 80 个（REFS 全保留，ref 照常可用）；
+  // missingRequired 不受影响（全量），模型按序处理完本批后 get_form 继续。
+  const MAX_SNAPSHOT_FIELDS = 80
+  const totalFields = fields.length
+  let truncatedFields = 0
+  if (fields.length > MAX_SNAPSHOT_FIELDS) {
+    truncatedFields = fields.length - MAX_SNAPSHOT_FIELDS
+    fields.length = MAX_SNAPSHOT_FIELDS
+  }
 
   return {
     stepTitle: stepTitle(),
@@ -370,6 +389,7 @@ function buildSnapshot () {
     buttons,
     actions,
     missingRequired,
+    ...(truncatedFields ? { totalFields, truncatedFields } : {}),
   }
 }
 
