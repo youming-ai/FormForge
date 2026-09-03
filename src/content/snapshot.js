@@ -4,9 +4,9 @@
 
 let REFS = [] // [{ref, item, kind}]
 
-// 最终提交类按钮文案（安全红线：绝不点击）。刻意不含「申請/次へ/確認」等常见中间步骤词。
-// 宁可误拦（停下留人工）也不放过提交。
-const SUBMIT_WORDS = /申込|申込み|送信|登録|提出|決済|購入|注文|完了|submit|place order|order now|checkout|purchase|buy now|complete/i
+// 最终提交类按钮文案（安全红线：绝不点击）。多语言覆盖（日/中/英/韩/西/法/德）。
+// 刻意不含「申請/次へ/確認/下一步/继续」等常见中间步骤词——宁可误拦（停下留人工）也不放过提交。
+const SUBMIT_WORDS = /申込|申込み|送信|登録|提出|決済|購入|注文|完了|submit|place order|order now|checkout|purchase|buy now|complete|register|sign up|create account|pay now|confirm order|提交|确认提交|立即购买|下单|支付|注册|完成|同意并提交|제출|등록|결제|구매|주문|완료|enviar|soumettre|absenden|bestellen|kaufen|bezahlen|confirmar|comprar|pagar/i
 
 // —— 作用域：可见表单中控件最多的 → body ——
 function pickScope () {
@@ -54,6 +54,8 @@ function classify (item) {
   if (item.querySelector('textarea')) return 'textarea'
   if (item.querySelector('.ant-checkbox-wrapper') || item.querySelector('input[type="checkbox"]')) return 'checkbox'
   if (item.querySelector('input:not([type="file"])')) return 'text'
+  // contenteditable 富文本（div[contenteditable] 等，现代表单常见）
+  if (item.matches?.('[contenteditable="true"], [contenteditable=""]') || item.querySelector('[contenteditable="true"], [contenteditable=""]')) return 'richtext'
   return 'unknown'
 }
 
@@ -106,8 +108,9 @@ function valueOf (item, kind) {
     return (item.querySelector('textarea, input')?.value || '')
   }
   if (kind === 'select') {
-    const ant = item.querySelector('.ant-select-selection-item')
-    if (ant) return (ant.getAttribute('title') || ant.textContent).trim()
+    // Ant select：单/多选都取所有已选 .ant-select-selection-item（多选有多个）
+    const ant = [...item.querySelectorAll('.ant-select-selection-item')]
+    if (ant.length) return ant.map(el => (el.getAttribute('title') || el.textContent).trim()).filter(Boolean).join(' | ')
     // 原生 select：占位项（value=""，如「選択してください」）视为未填——浏览器会自动选中它，不能当已填
     const nat = item.querySelector('select')
     const opt = nat?.selectedOptions?.[0]
@@ -135,6 +138,10 @@ function valueOf (item, kind) {
     if (n) return `已上传 ${n} 个文件`
     return item.querySelector('input[type="file"]')?.files?.length ? '已选文件' : ''
   }
+  if (kind === 'richtext') {
+    const el = item.matches?.('[contenteditable]') ? item : item.querySelector('[contenteditable]')
+    return (el?.textContent || '').trim()
+  }
   return ''
 }
 
@@ -155,7 +162,7 @@ const checkboxOptionsOf = item => {
 // 原生控件 → 字段单元：radio/checkbox 尝试按 name 在组容器（fieldset/[role]/ul/table）内聚合；
 // 其余取最近 label 或父元素为单元。已被 Ant 路径覆盖的控件跳过。
 function nativeFieldUnits (scope, covered) {
-  const els = [...scope.querySelectorAll('input, select, textarea')]
+  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""]')]
     .filter(el => visible(el) && !el.disabled)
     .filter(el => !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
     .filter(el => !covered.some(c => c.contains(el)))
@@ -190,6 +197,44 @@ function nativeFieldUnits (scope, covered) {
   return units
 }
 
+// —— 可点卡片组检测（通用）：① 站点自定义 .plan-select ② [role=radio]/[role=option] 组 ——
+// 返回 [{root, cards, titleOf, activeOf}]；titleOf 取卡片标题，activeOf 判选中态。
+function findCardGroups (scope) {
+  const groups = []
+  // ① 已知站点模式 .plan-select（自定义方案选择卡片）
+  for (const root of scope.querySelectorAll('.plan-select')) {
+    const cards = [...root.querySelectorAll('.plan-select__plan')]
+    if (cards.length) groups.push({
+      root,
+      cards,
+      titleOf: c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim(),
+      activeOf: c => c.classList.contains('active'),
+    })
+  }
+  // ② role=radio/option 组（可点卡片式选择，通用无障碍模式）
+  for (const grp of scope.querySelectorAll('[role="radiogroup"], [role="group"]')) {
+    const cards = [...grp.querySelectorAll('[role="radio"], [role="option"]')].filter(visible)
+    if (cards.length > 1) groups.push({
+      root: grp,
+      cards,
+      titleOf: c => c.textContent.trim(),
+      activeOf: c => c.getAttribute('aria-checked') === 'true' || c.classList.contains('active') || c.classList.contains('selected'),
+    })
+  }
+  return groups
+}
+
+// 页面语言检测：优先 html[lang]，否则按 body 文本 CJK 字符启发式（ja/zh/ko）
+function detectLang () {
+  const htmlLang = (document.documentElement?.getAttribute('lang') || '').trim()
+  if (htmlLang) return htmlLang
+  const t = (document.body?.textContent || '').slice(0, 2000)
+  if (/[\u3040-\u30ff]/.test(t)) return 'ja'
+  if (/[\uac00-\ud7af]/.test(t)) return 'ko'
+  if (/[\u4e00-\u9fff]/.test(t)) return 'zh'
+  return ''
+}
+
 function buildSnapshot () {
   REFS = []
   const scope = scopeEl()
@@ -207,6 +252,7 @@ function buildSnapshot () {
     REFS.push({ ref, item, kind })
     const f = { ref, kind, label: labelOf(item) || placeholderOf(item), value: valueOf(item, kind), required: isRequired(item) }
     f.filled = !!String(f.value || '').trim()
+    if (kind === 'select' && item.querySelector('.ant-select-multiple')) f.multiple = true // 多选下拉
     const err = errorOf(item)
     if (err) f.error = err
     if (kind === 'radio' && !f.filled) f.options = radioOptionsOf(item)
@@ -215,16 +261,13 @@ function buildSnapshot () {
     fields.push(f)
   }
 
-  // 2) 可点卡片(.plan-select, 站点自定义方案选择)
-  scope.querySelectorAll('.plan-select').forEach(planRoot => {
-    if (!visible(planRoot)) return
-    covered.push(planRoot)
-    const cards = [...planRoot.querySelectorAll('.plan-select__plan')]
-    if (!cards.length) return
+  // 2) 可点卡片组（.plan-select 或 role=radio/option 组）
+  for (const { root, cards, titleOf, activeOf } of findCardGroups(scope)) {
+    if (!visible(root)) continue
+    covered.push(root)
     const ref = 'e' + REFS.length
-    REFS.push({ ref, item: planRoot, kind: 'cards' })
-    const active = cards.find(c => c.classList.contains('active'))
-    const titleOf = c => (c.querySelector('.plan-select__plan__title')?.textContent || c.textContent || '').trim()
+    REFS.push({ ref, item: root, kind: 'cards', cards, titleOf, activeOf })
+    const active = cards.find(activeOf)
     fields.push({
       ref, kind: 'cards', label: '方案/计划卡片',
       value: active ? titleOf(active) : '',
@@ -232,7 +275,7 @@ function buildSnapshot () {
       ...(active ? {} : { options: cards.map(titleOf) }), // 已选中的卡片不必再给选项列表，省 token
       required: true, // 卡片组通常必填；若目标站点非必填，模型看到 filled 会跳
     })
-  })
+  }
 
   // 3) 原生 HTML 控件兜底（不在 Ant 字段/卡片内的 input/select/textarea）
   for (const box of nativeFieldUnits(scope, covered)) {
@@ -257,16 +300,23 @@ function buildSnapshot () {
     fields.push(f)
   }
 
-  // 4) 导航按钮（通用：submit/primary 类按钮，标注最终提交类为禁止）
+  // 4) 导航按钮（通用：全页面扫描，覆盖 form 外部的步骤条与底部操作区，如 .ant-steps-action）
   const buttons = []
-  ;[...scope.querySelectorAll('button, input[type="submit"]')].filter(visible).filter(b => !b.disabled).slice(0, 10).forEach(b => {
+  const allNavElements = Array.from(new Set([
+    ...scope.querySelectorAll('button, input[type="submit"], [role="button"], a.ant-btn'),
+    ...document.querySelectorAll('button, input[type="submit"], [role="button"], a.ant-btn, .ant-steps-action button')
+  ])).filter(visible)
+
+  allNavElements.slice(0, 15).forEach(b => {
     const t = (b.textContent || b.value || '').trim()
     if (!t) return
-    const forbidden = SUBMIT_WORDS.test(t)
+    const normText = t.replace(/[\s\u00a0\u3000]+/g, '')
+    const forbidden = SUBMIT_WORDS.test(normText)
+    const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('ant-btn-disabled') || b.classList.contains('is-disabled')
     buttons.push({
       label: t,
       kind: forbidden ? 'submit' : ((b.type === 'submit' || /primary|main/i.test(b.className)) ? 'primary' : 'default'),
-      disabled: b.disabled,
+      disabled: !!disabled,
       forbidden, // 最终提交类：点击会被硬拦截
     })
   })
@@ -277,7 +327,10 @@ function buildSnapshot () {
     if (!visible(b) || b.disabled) return
     const label = b.textContent.trim()
     if (!label) return
-    if (SUBMIT_WORDS.test(label)) return // 最终提交类不进 actions，避免 click 误点
+    const normLabel = label.replace(/[\s\u00a0\u3000]+/g, '')
+    if (SUBMIT_WORDS.test(normLabel)) return // 最终提交类不进 actions，避免 click 误点
+    // 导航类按钮（次へ/戻る/確認画面へ）归属 click_button，不进 actions
+    if (/次へ|次へ進む|次のステップ|進む|続ける|確認画面へ|戻る|前へ/i.test(normLabel)) return
     const ref = 'e' + REFS.length
     REFS.push({ ref, item: b, kind: 'button' })
     actions.push({ ref, label })
@@ -298,6 +351,7 @@ function buildSnapshot () {
   return {
     stepTitle: stepTitle(),
     isConfirmStep: isConfirm(),
+    lang: detectLang(),
     fields,
     buttons,
     actions,

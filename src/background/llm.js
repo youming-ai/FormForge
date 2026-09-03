@@ -5,9 +5,9 @@ export const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加�
 export const DEFAULT_SETTINGS = {
   // 局域网 LM Studio（OpenAI 兼容 + function calling）。备选：macstudio llama.cpp/llama-swap <your-host>:8800，Tailscale <tailscale-host>:8434，本机 localhost:1234
   endpoint: 'http://<your-host>:8434/v1/chat/completions',
-  // 纯 DOM 方案不依赖多模态：选 MoE（30B 总参仅 3B 激活、已加载）——agent 多轮循环对每 token
-  // 速度敏感，比稠密 27B 快数倍，且 tool calling 已验证。填 auto 则自动选「已加载」的对话模型。
-  model: 'qwen3.6-35b-a3b-mlx',
+  // 纯 DOM 方案不依赖多模态：固定用已加载的 gemma-4-26B-A4B（MoE 4B 激活，多轮循环快）。
+  // 填 auto 则自动选「最合适的已加载」对话模型（跳过翻译/专用模型，优先 MoE/Qwen）。
+  model: 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
@@ -21,8 +21,10 @@ export function parseArgs (tc) {
   try { return JSON.parse(tc.function?.arguments || '{}') } catch (_) { return {} }
 }
 
-/** 解析模型 → id 字符串。model='auto' 时调 /v1/models 优先选「已加载」的，
- * 排除 embedding/asr/rerank/whisper（llama-swap 返回 status.loaded/unloaded）。 */
+/** 解析模型 → id 字符串。model='auto' 时从 /v1/models 选「最适合本 agent」的对话模型：
+ *  ① 排除 embedding/asr/rerank/whisper 及翻译/专用模型（HY-MT 等）
+ *  ② 优先已加载（避免冷加载等待）；无加载时按能力选，服务会自动拉起
+ *  ③ 同档里 MoE(A3B/A4B，激活参数少、多轮快) ≥ Qwen 系（本 agent 工具调用最稳）≥ 参数量大者 */
 export async function resolveModel (settings) {
   const modelsUrl = settings.endpoint.replace(/\/chat\/completions\/?$/, '/models')
   const wanted = (settings.model || '').trim()
@@ -31,9 +33,26 @@ export async function resolveModel (settings) {
     const r = await fetch(modelsUrl)
     if (r.ok) {
       const j = await r.json()
-      const chat = (j?.data || []).filter(x => x.id && !/embed|asr|rerank|whisper/i.test(x.id))
-      const id = (chat.find(x => x.status?.value === 'loaded') || chat[0])?.id
-      if (id) return id
+      const chat = (j?.data || []).filter(x =>
+        x.id && /text/.test((x.architecture?.input_modalities || ['text']).join(' ')) &&
+        !/embed|asr|rerank|whisper|hy[_-]?mt|mt-?\d|translat/i.test(x.id))
+      if (!chat.length) return 'local-model'
+      // 总参数量（GB）：优先 meta（加载过的准确），否则按 id 解析（35B-A3B → 35）
+      const params = x => {
+        if (x.meta?.n_params) return x.meta.n_params / 1e9
+        const m = (x.id || '').match(/(\d+(?:\.\d+)?)[Bb]-(?:A\d+[Bb])?/) || (x.id || '').match(/(\d+(?:\.\d+)?)[Bb](?![A-Za-z])/)
+        return m ? parseFloat(m[1]) : 0
+      }
+      const score = x => {
+        let s = 0
+        if (x.status?.value === 'loaded') s += 100000          // 已加载优先（避免冷加载等待）
+        if (/A\d+B/i.test(x.id || '')) s += 300                // MoE：激活参数少，多轮循环快
+        if (/Qwen/i.test(x.id || '')) s += 500                 // Qwen 工具调用最稳（本 agent 首选系）
+        s += Math.min(params(x), 40) * 100                     // 参数量越大通常能力越强（封顶 40B）
+        return s
+      }
+      const best = [...chat].sort((a, b) => score(b) - score(a))[0]
+      if (best?.id) return best.id
     }
   } catch (_) { /* 兜底 */ }
   return 'local-model'

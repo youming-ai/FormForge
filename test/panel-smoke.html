@@ -27,9 +27,9 @@ window.chrome = {
   const card = root.getElementById('card')
   assert(card, '卡片存在')
   const startBtn = root.getElementById('start')
-  eq(startBtn.textContent, '开始自动填写', '待机态按钮文案')
+  eq(startBtn.textContent, '自動入力を開始', '待机态按钮文案')
   eq(startBtn.className, 'btn idle', '待机态按钮样式 idle')
-  eq(root.getElementById('headstatus').textContent, '就绪', '头部状态词')
+  eq(root.getElementById('headstatus').textContent, '待機中', '头部状态词')
 
   // 2. 场景自动增高
   const scenario = root.getElementById('scenario')
@@ -54,10 +54,10 @@ window.chrome = {
 
   // 5. 结束态复位
   setRunning(false)
-  eq(startBtn.textContent, '开始自动填写', '结束态按钮复位')
+  eq(startBtn.textContent, '自動入力を開始', '结束态按钮复位')
   eq(startBtn.className, 'btn idle', '结束态按钮类 idle')
   eq(card.classList.contains('running'), false, 'running 类移除')
-  eq(root.getElementById('headstatus').textContent, '已结束', '头部状态已结束')
+  eq(root.getElementById('headstatus').textContent, '完了', '头部状态已结束')
 
   // 6. 折叠
   root.getElementById('collapse').click()
@@ -66,10 +66,10 @@ window.chrome = {
   eq(root.getElementById('body').classList.contains('hidden'), false, '展开生效')
 
   // 7. 状态词映射
-  setStatus('设置已保存'); eq(root.getElementById('headstatus').textContent, '设置已保存', '状态词-保存')
-  setStatus('推理服务响应超时（>5 分钟）'); eq(root.getElementById('headstatus').textContent, '需要处理', '状态词-超时')
-  setStatus('已达最大轮数 120，自动停止'); eq(root.getElementById('headstatus').textContent, '需要处理', '状态词-达上限')
-  setRunning(true); eq(root.getElementById('headstatus').textContent, '运行中', '状态词-运行中')
+  setStatus('設定を保存しました'); eq(root.getElementById('headstatus').textContent, '保存完了', '状态词-保存')
+  setStatus('推理服务响应超时（>5 分钟）'); eq(root.getElementById('headstatus').textContent, '要確認', '状态词-超时')
+  setStatus('已达最大轮数 120，自动停止'); eq(root.getElementById('headstatus').textContent, '要確認', '状态词-达上限')
+  setRunning(true); eq(root.getElementById('headstatus').textContent, '実行中', '状态词-运行中')
   setRunning(false)
 
   const p = cases.filter(c => c.ok).length

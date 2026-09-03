@@ -293,6 +293,36 @@ window.chrome = {
   eq(c3.passOk, true, 'D1b fixed 弹窗字段进快照（password）')
   eq(c3.blocked.ok, false, 'D1b 「登録する」按钮被词表拦截')
 
+  // ===== E. 导航按钮匹配增强（AntD 次 へ / 外部按钮 / 确认画面へ / 禁用检测）=====
+  out.push('<div class="section">E. 导航按钮与 次へ 匹配</div>')
+  // E1: 表单外 .ant-steps-action 中的「次 へ」（含空格）正常匹配
+  const stepContainer = document.createElement('div')
+  stepContainer.innerHTML = `
+    <div class="ant-steps-action">
+      <button type="button" class="ant-btn ant-btn-primary" id="btn-next-space"><span>次 へ</span></button>
+    </div>`
+  document.body.appendChild(stepContainer)
+  const nav1 = findNavButton('next')
+  assert(nav1.btn && nav1.btn.id === 'btn-next-space', 'E1 识别表单外部且含空格的「次 へ」按钮')
+  stepContainer.remove()
+
+  // E2: 「確認画面へ」正常作为 next 候选且得分高
+  const confirmBtnHolder = document.createElement('div')
+  confirmBtnHolder.innerHTML = '<button type="button" class="ant-btn ant-btn-primary" id="btn-confirm-screen">確認画面へ</button>'
+  document.body.appendChild(confirmBtnHolder)
+  const nav2 = findNavButton('next')
+  assert(nav2.btn && nav2.btn.id === 'btn-confirm-screen', 'E2 识别「確認画面へ」为下一步导航')
+  confirmBtnHolder.remove()
+
+  // E3: 次へ 按钮处于 disabled 状态时，click_button 返回明确提示而非误判为单页
+  const disBtnHolder = document.createElement('div')
+  disBtnHolder.innerHTML = '<button type="button" class="ant-btn ant-btn-disabled" disabled id="btn-next-dis">次へ</button>'
+  document.body.appendChild(disBtnHolder)
+  const rDis = await execTool('click_button', { target: 'next' })
+  eq(rDis.ok, false, 'E3 disabled 的「次へ」点击失败')
+  assert(/禁用|disabled/.test(rDis.result), 'E3b 明确提示「次へ」当前处于禁用状态，不要直接 finish', rDis.result)
+  disBtnHolder.remove()
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`

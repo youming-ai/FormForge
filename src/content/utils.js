@@ -44,7 +44,7 @@ const visible = el => {
   return rect.width > 0 && rect.height > 0
 }
 
-// 从 localStorage 里的 JWT(ACCESS_TOKEN, es-banana 缓存)解出当前登录用户邮箱
+// 从 localStorage/sessionStorage 里的 JWT 解出当前登录用户邮箱（通用：扫常见 token key）
 function detectUserEmail () {
   // base64url → UTF-8 字符串（TextDecoder 替代已弃用的 escape/unescape）
   const b64UrlDecode = s => {
@@ -53,18 +53,26 @@ function detectUserEmail () {
     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0))
     return new TextDecoder().decode(bytes)
   }
+  // 常见 token 存储 key（大小写/下划线/连字符变体都覆盖）
+  const isTokenKey = k => /(access[_-]?token|id[_-]?token|jwt|auth|session|credential|token)$/i.test(k)
+  const tryDecode = raw => {
+    try { const o = JSON.parse(raw); raw = o?.value ?? raw } catch (_) { /* 非 JSON 直接用 */ }
+    const parts = String(raw).split('.')
+    if (parts.length < 2) return ''
+    try {
+      const payload = JSON.parse(b64UrlDecode(parts[1]))
+      const email = payload.email || payload.mail || payload.preferred_username || payload.username
+      if (email && /@/.test(email)) return String(email)
+    } catch (_) { /* 解码失败跳过 */ }
+    return ''
+  }
   try {
-    for (const k of Object.keys(localStorage)) {
-      if (!/ACCESS_TOKEN$/.test(k)) continue
-      let raw = localStorage.getItem(k)
-      try { const o = JSON.parse(raw); raw = o?.value ?? raw } catch (_) { /* 非 JSON 直接用 */ }
-      const parts = String(raw).split('.')
-      if (parts.length < 2) continue
-      try {
-        const payload = JSON.parse(b64UrlDecode(parts[1]))
-        const email = payload.email || payload.mail || payload.preferred_username || payload.username
-        if (email && /@/.test(email)) return String(email)
-      } catch (_) { /* 解码失败跳过 */ }
+    for (const store of [localStorage, sessionStorage]) {
+      for (const k of Object.keys(store)) {
+        if (!isTokenKey(k)) continue
+        const hit = tryDecode(store.getItem(k))
+        if (hit) return hit
+      }
     }
   } catch (_) { /* 忽略 */ }
   return ''
