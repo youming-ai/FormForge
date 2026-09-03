@@ -157,7 +157,6 @@ function createPanel () {
     rmimg: $('rmimg'),
     prodwarn: $('prodwarn'),
     headstatus: $('headstatus'),
-    statedot: $('statedot'),
     savedtip: $('savedtip'),
     settings: $('settings'),
   }

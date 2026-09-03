@@ -221,15 +221,6 @@ window.chrome = {
   modal.remove() // D1b 在 C 区后用 iframe（fixtures-fixed.html）验证——scope 选「控件最多的 form」，本页 main-form 优先是设计行为
 
   // D2: detached ref → getRef 返回 null（明确报错而非静默写孤儿节点）
-  const orph = document.createElement('div')
-  orph.innerHTML = '<input id="f-orph" type="text">'
-  document.body.appendChild(orph)
-  const tmpSnap = buildSnapshot()
-  const orphField = tmpSnap.fields.find(f => (f.label || '').includes('サイド') === false && f.ref)
-  // 直接构造：取一个字段后把它的 DOM 移除
-  const orphRef = tmpSnap.fields[0]?.ref
-  orph.remove()
-  // tmpSnap 的 REFS 已被后续 buildSnapshot 覆盖，改为在隔离环境模拟：
   // 手动把 REFS 里一个字段的 item detach 后再 getRef
   const snap2 = buildSnapshot() // 重建 REFS
   const anyField = snap2.fields[0]

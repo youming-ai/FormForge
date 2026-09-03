@@ -467,7 +467,7 @@ async function readOptions (ref, query = '') {
       input.focus()
       input.dispatchEvent(new FocusEvent('focus', { bubbles: true }))
       setNativeValue(input, keyword)
-      await sleep(700) // EsSearchSelect 远程搜索 debounce 500ms + 接口耗时
+      await sleep(700) // 远程搜索下拉 debounce（约 500ms）+ 接口耗时
       await waitFor(() => optionState(activeDropdown(r.item)) === 'usable', { timeout: 3000, step: 80 })
     }
     let opts = optionsOf(r.item).filter(usableOption).map(optText).filter(Boolean)

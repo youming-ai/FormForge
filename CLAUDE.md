@@ -39,4 +39,4 @@
 - 真机测：`chrome://extensions` 改完**点「重新加载」**，刷新表单页，看浮窗实时日志（`▶`工具调用 / `↳`结果）。
 - 端到端连通可在本机 `node` 里 `fetch` 推理服务 `/v1/chat/completions` 带 `tools` 验证返回 `tool_calls`。
 - **不要**引入 agent-sdk/打包构建（MV3 不能运行时 require，上 SDK 要 bundler，破坏即装即用；background 已按 ES module 拆分 `src/background/`，content 侧靠 manifest 多文件按序注入共享作用域，均零构建；工具循环本身才几十行）。
-- 图标：白色圆角方块 + 黑色 {F}（FormForge 标识，取自 forgecode.dev logo 的图形部分、去除文字）；素材在 `icons/forge_mark.svg`（源）与 `icons/forge_mark_512.png`（Chrome 渲染的高清位图），`make_icons.py` 贴图生成各尺寸。
+- 图标：Zima Blue `#0080ff` 的 {F} + 透明底（FormForge 标识，取自 forgecode.dev logo 的图形部分、去除文字）；素材在 `icons/forge_mark.svg`（源）与 `icons/forge_mark_512.png`（透明底黑标母版），`make_icons.py` 套色生成各尺寸。

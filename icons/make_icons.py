@@ -9,8 +9,7 @@ from PIL import Image
 SIZE = 512  # 母版尺寸，再缩小到各档，抗锯齿好
 ZIMA = (0, 128, 255, 255)  # Zima Blue
 
-# {F} 图形路径（从 forgecode.dev logo-dark.svg 提取，viewBox 0 0 100 95）
-MARK_PATH = "M100 39.1107V49.114C96.135 49.114 92.9891 52.265 92.9891 56.1462V72.2649C92.9891 80.9477 85.9383 88 77.2795 88H55.447"
+# {F} 图形源自 forgecode.dev logo（去除文字，仅保留图形标记的位图 forge_mark_512.png）
 
 def draw_logo():
     S = SIZE

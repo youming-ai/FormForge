@@ -24,8 +24,6 @@ export function toolPhase (name) {
 // 每个 tab 正在运行任务的请求中止控制器：用户「停止」时实时中断 in-flight LLM 请求
 const controllers = new Map()
 
-const sleep = ms => new Promise(r => setTimeout(r, ms))
-
 // 压缩消息历史：保留 system + 一条压缩说明 + 最近若干条（从非 tool 消息边界开始，避免孤立 tool 结果开头）
 function compressHistory (messages) {
   if (messages.length <= MAX_KEPT_MESSAGES) return messages
