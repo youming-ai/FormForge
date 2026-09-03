@@ -123,7 +123,7 @@ function createPanel () {
             <label class="fl" for="endpoint">推論サービス URL<span class="hint">OpenAI 互換の /v1/chat/completions</span></label>
             <input id="endpoint" type="text" spellcheck="false" placeholder="http://<your-host>:8434/v1/chat/completions" />
             <label class="fl" for="model">モデル名<span class="hint">MoE 推奨モデル（変更も可）</span></label>
-            <input id="model" type="text" spellcheck="false" placeholder="unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M" />
+            <input id="model" type="text" spellcheck="false" placeholder="Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M" />
             <label class="fl" for="baseemail">ベースメールアドレス<span class="hint">空欄時は自動検出。テスト時は安全なエイリアスを使用</span></label>
             <input id="baseemail" type="text" inputmode="email" placeholder="自動検出または手動入力" />
             <label class="fl" for="uploadimg">固定テスト画像<span class="hint">任意（最大 4MB）。未指定時はダミー画像を自動生成</span></label>
@@ -187,7 +187,7 @@ function createPanel () {
   chrome.storage.local.get('agentSettings').then(({ agentSettings }) => {
     const s = agentSettings || {}
     if (s.endpoint) ui.endpoint.value = s.endpoint
-    ui.model.value = s.model || 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M'
+    ui.model.value = s.model || 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M'
     // 基础邮箱：设置 > 页面探测；都没有就留空提示
     if (s.baseEmail) ui.baseemail.value = s.baseEmail
     else { const d = detectUserEmail(); if (d) { ui.baseemail.value = d; ui.baseemail.placeholder = `検出済み：${d}` } }

@@ -5,9 +5,9 @@ export const LLM_TIMEOUT_MS = 5 * 60 * 1000 // 单次 LLM 请求超时（冷加�
 export const DEFAULT_SETTINGS = {
   // 局域网 LM Studio（OpenAI 兼容 + function calling）。备选：macstudio llama.cpp/llama-swap <your-host>:8800，Tailscale <tailscale-host>:8434，本机 localhost:1234
   endpoint: 'http://<your-host>:8434/v1/chat/completions',
-  // 纯 DOM 方案不依赖多模态：固定用已加载的 gemma-4-26B-A4B（MoE 4B 激活，多轮循环快）。
+  // 纯 DOM 方案不依赖多模态：默认 Qwen3-30B-A3B（MoE 3B 激活，多轮循环快，工具调用稳）。
   // 填 auto 则自动选「最合适的已加载」对话模型（跳过翻译/专用模型，优先 MoE/Qwen）。
-  model: 'unsloth/gemma-4-26B-A4B-it-GGUF:gemma-4-26B-A4B-it-UD-Q4_K_M',
+  model: 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M',
   // 当前用户邮箱：不写死人名，运行时由 content 自动探测(JWT)或面板设置提供
   baseEmail: '',
 }
