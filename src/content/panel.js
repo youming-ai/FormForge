@@ -23,9 +23,9 @@ function createPanel () {
       .hd { display: flex; align-items: center; justify-content: space-between; gap: 8px;
         padding: 10px 12px; border-bottom: 1px solid #e4e4e7; }
       .brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
-      .mark-box { width: 22px; height: 22px; background: #111827; color: #fff;
+      .mark-box { width: 22px; height: 22px; background: transparent; color: #0080ff;
         display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-      .mark { width: 12px; height: 12px; }
+      .mark { width: 18px; height: 18px; }
       .name { font-size: 13px; font-weight: 600; }
       .hd-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
       .status { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; }
@@ -84,7 +84,7 @@ function createPanel () {
       .log:empty::before { content: "ログはありません"; display: block; color: #d4d4d8; }
       .log .l { padding: 1px 0; }
       .c-assistant { color: #111827; }
-      .c-tool { color: #1d4ed8; }
+      .c-tool { color: #0080ff; }
       .c-result { color: #71717a; }
       .c-result.err, .c-error { color: #dc2626; }
       .c-status { color: #a1a1aa; }
