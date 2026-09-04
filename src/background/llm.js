@@ -20,7 +20,10 @@ export async function getSettings () {
 }
 
 export function parseArgs (tc) {
-  try { return JSON.parse(tc.function?.arguments || '{}') } catch (_) { return {} }
+  // 部分 OpenAI 兼容服务直接返回对象而非 JSON 字符串；此时 JSON.parse 会抛错导致参数全丢
+  const a = tc.function?.arguments
+  if (a && typeof a === 'object') return a
+  try { return JSON.parse(a || '{}') } catch (_) { return {} }
 }
 
 /** 解析模型 → id 字符串。model='auto' 时从 /v1/models 选「最适合本 agent」的对话模型：
@@ -32,7 +35,8 @@ export async function resolveModel (settings) {
   const wanted = (settings.model || '').trim()
   if (wanted && wanted !== 'auto') return wanted
   try {
-    const r = await fetch(modelsUrl)
+    // 探测必须带超时：主机挂起（丢包不拒绝连接）时否则会永远卡在 resolveModel，面板停在「运行中」
+    const r = await fetch(modelsUrl, { signal: AbortSignal.timeout(10_000) })
     if (r.ok) {
       const j = await r.json()
       const chat = (j?.data || []).filter(x =>
@@ -81,7 +85,7 @@ export async function callLLM ({ endpoint, model, messages, tools, signal }) {
         tools,
         tool_choice: 'auto',
         temperature: 0.3,
-        max_tokens: 1200, // 工具调用 JSON + 简短说明足够；收紧上限避免个别轮次拖长
+        max_tokens: 4096, // 需容下 Qwen3 的 <think> 段：截断（finish_reason=length）会让整轮没有 tool_calls
         stream: false,
         cache_prompt: true, // llama.cpp / LM Studio：保留 KV prompt cache，多轮工具循环显著降低首 token 延迟
       }),

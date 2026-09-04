@@ -323,6 +323,38 @@ window.chrome = {
   eq(isSubmitLabel('申込む'), true, 'F5 「申込む」仍拦截')
   eq(isSubmitLabel('送信'), true, 'F6 「送信」仍拦截')
   eq(isSubmitLabel('Submit'), true, 'F7 「Submit」仍拦截')
+  // F7a-g: 归一化后无空格 → 多词英文词条必须连写；日文「申し込む」等高频提交词
+  eq(isSubmitLabel('Place Order'), true, 'F7a 「Place Order」（去空格后匹配）→拦截')
+  eq(isSubmitLabel('Sign Up'), true, 'F7b 「Sign Up」→拦截')
+  eq(isSubmitLabel('Buy Now'), true, 'F7c 「Buy Now」→拦截')
+  eq(isSubmitLabel('お申し込み'), true, 'F7d 「お申し込み」（申込中间有し）→拦截')
+  eq(isSubmitLabel('確定する'), true, 'F7e 「確定する」→拦截')
+  eq(isSubmitLabel('Apply'), true, 'F7f 整串等于「Apply」→拦截')
+  eq(isSubmitLabel('Apply coupon'), false, 'F7g 「Apply coupon」非整串→不误拦')
+  eq(isSubmitLabel('支払方法を変更'), false, 'F7h 「支払方法を変更」→不误拦')
+
+  // F7i: 字段 ref 里藏着提交按钮（Form.Item 包 htmlType=submit）→ click 硬拦截
+  const trap = document.createElement('div')
+  trap.className = 'ant-form-item'
+  trap.innerHTML = '<div class="ant-form-item-label"><label>送信トラップ</label></div><button type="submit">送信</button>'
+  document.getElementById('main-form').appendChild(trap)
+  const trapF = buildSnapshot().fields.find(f => f.label === '送信トラップ')
+  const rTrap = trapF ? await execTool('click', { ref: trapF.ref }) : { ok: true }
+  assert(!!trapF && rTrap.ok === false && /硬拦截/.test(rTrap.result), 'F7i click(ref) 命中提交按钮→硬拦截')
+  trap.remove()
+
+  // F7j: 控件直接挂在 <form> 下 → 单元是控件自身而非整个 form（否则 click 会摸到表单里的提交按钮）
+  const form = document.getElementById('main-form')
+  const bare = document.createElement('input')
+  bare.setAttribute('aria-label', '裸フィールド')
+  const bareSubmit = document.createElement('button')
+  bareSubmit.type = 'submit'
+  bareSubmit.textContent = '送信'
+  form.append(bare, bareSubmit)
+  const bareF = buildSnapshot().fields.find(f => f.label === '裸フィールド')
+  const rBare = bareF ? await execTool('click', { ref: bareF.ref }) : { ok: false }
+  assert(!!bareF && rBare.ok === true, 'F7j form 直接子控件的单元是控件自身（未把整个 form 当字段）')
+  bare.remove(); bareSubmit.remove()
 
   // F8: lang 检测（runner.html 自带 lang=ja）
   eq(buildSnapshot().lang, 'ja', 'F8 html[lang=ja] → lang=ja')
@@ -434,12 +466,12 @@ window.chrome = {
   swNat.remove()
   // ===== G5. 日期候选纯函数（含日文年月日）=====
   out.push('<div class="section">G5. dateCandidates 日期格式推断</div>')
-  out.push('<div class="section">G5. dateCandidates 日期格式推断</div>')
   eq(dateCandidates('YYYY年MM月DD日', 2024, 4, 5).candidates[0], '2024年04月05日', 'G5 日文 placeholder 首选年月日')
-  eq(dateCandidates('YYYY/MM/DD', 2024, 4, 5).candidates[0], '2024/4/5', 'G5b 斜杠年优先')
-  eq(dateCandidates('MM/DD/YYYY', 2024, 4, 5).candidates[0], '4/5/2024', 'G5c 美式月优先')
-  eq(dateCandidates('DD/MM/YYYY', 2024, 4, 5).candidates[0], '5/4/2024', 'G5d 欧式日优先')
-  eq(dateCandidates('', 2024, 4, 5).candidates[0], '2024/4/5', 'G5e 空 placeholder 默认年优先')
+  eq(dateCandidates('YYYY/MM/DD', 2024, 4, 5).candidates[0], '2024/04/05', 'G5b 斜杠年优先（月日补零）')
+  eq(dateCandidates('MM/DD/YYYY', 2024, 4, 5).candidates[0], '04/05/2024', 'G5c 美式月优先')
+  eq(dateCandidates('DD/MM/YYYY', 2024, 4, 5).candidates[0], '05/04/2024', 'G5d 欧式日优先')
+  eq(dateCandidates('', 2024, 4, 5).candidates[0], '2024-04-05', 'G5e 空 placeholder 默认 YYYY-MM-DD')
+  eq(dateCandidates('', 2024, 4, 5).candidates.includes('2024/04/05'), true, 'G5f 无分隔符线索时补斜杠候选')
 
   // ===== G7. 裸开关 button 进原生扫描（label 包裹，非 Ant 表单）=====
   out.push('<div class="section">G7. 裸开关与超大表单</div>')
@@ -485,6 +517,112 @@ window.chrome = {
   // G6: 语言检测不到时默认日文（目标表单以日文为主）
   eq(detectLang(document.implementation.createHTMLDocument('')), '', 'G6 空文档检测不到语言')
   eq(buildSnapshot().lang, 'ja', 'G6b 快照 lang 缺失时回退 ja')
+
+  // ===== H. P1 回归（ref 编号 / 隐藏校验提示 / radio 幻影字段 / 上传触发器）=====
+  out.push('<div class="section">H. P1 回归</div>')
+  const form2 = document.getElementById('main-form')
+
+  // H1: ref 编号跨快照不重用（同批 get_form 重建 REFS 后旧 ref 不会指向别的字段）
+  const refA = buildSnapshot().fields[0].ref
+  const refB = buildSnapshot().fields[0].ref
+  assert(refA !== refB, 'H1 ref 编号跨快照自增（不重用）', `${refA} vs ${refB}`)
+  const stale = await execTool('fill_text', { ref: refA, value: 'x' })
+  eq(stale.ok, false, 'H1b 旧快照的 ref 明确失效而非写到别的字段')
+
+  // H2: 隐藏的常驻校验提示（Bootstrap .invalid-feedback）不算 error
+  const h2 = document.createElement('div')
+  h2.innerHTML = '<label for="h2i">隐藏错误字段</label><input id="h2i" type="text"><div class="invalid-feedback" style="display:none">必須です</div>'
+  form2.appendChild(h2)
+  const h2F = buildSnapshot().fields.find(f => f.label === '隐藏错误字段')
+  assert(h2F && !h2F.error, 'H2 隐藏的 .invalid-feedback 不当作校验错误', JSON.stringify(h2F))
+  h2.querySelector('.invalid-feedback').style.display = ''
+  const h2F2 = buildSnapshot().fields.find(f => f.label === '隐藏错误字段')
+  eq(h2F2 && h2F2.error, '必須です', 'H2b 显示后正常报错')
+  h2.remove()
+
+  // H3: fieldset 直接挂 radio → 只出 1 个组字段，不产生查不到选项的幻影字段
+  const h3 = document.createElement('fieldset')
+  h3.innerHTML = '<legend>性別</legend><input type="radio" name="h3sex" id="h3a" required><label for="h3a">男</label><input type="radio" name="h3sex" id="h3b"><label for="h3b">女</label>'
+  form2.appendChild(h3)
+  const h3Fs = buildSnapshot().fields.filter(f => f.label === '性別' || (f.kind === 'radio' && !f.label))
+  eq(h3Fs.length, 1, 'H3 fieldset 直接子 radio 只出 1 个字段（无幻影）', JSON.stringify(h3Fs))
+  eq((await execTool('choose_option', { ref: h3Fs[0].ref, option: '女' })).ok, true, 'H3b 组字段能选中选项')
+  h3.remove()
+
+  // H4: 上传触发器不进 actions（click 会弹原生文件框阻塞页面）
+  const h4 = document.createElement('div')
+  h4.innerHTML = '<div class="ant-upload"><button type="button">アップロード</button></div>'
+  form2.appendChild(h4)
+  assert(!buildSnapshot().actions.some(a => a.label === 'アップロード'), 'H4 .ant-upload 内按钮不进 actions')
+  h4.remove()
+
+  // H5: 一个 .ant-form-item 里平铺多个输入框（电话分段）→ 每个都要能单独寻址填写
+  const h5 = document.createElement('div')
+  h5.className = 'ant-form-item'
+  h5.innerHTML = '<div class="ant-form-item-label"><label class="ant-form-item-required">電話番号</label></div><div class="ant-input-group"><input placeholder="市外局番"><input placeholder="市内局番"><input placeholder="加入者番号"></div><div class="ant-form-item-explain-error">必須項目です</div>'
+  form2.appendChild(h5)
+  const h5Snap = buildSnapshot()
+  const h5Fs = h5Snap.fields.filter(f => ['市外局番', '市内局番', '加入者番号'].includes(f.label))
+  eq(h5Fs.length, 3, 'H5 输入组的 3 段各自成字段', JSON.stringify(h5Fs.map(f => f.label)))
+  // 必填/错误标记挂在外层 .ant-form-item 上：读不到就进不了 missingRequired，agent 会整段跳过
+  assert(h5Fs.every(f => f.required), 'H5c 各段继承外层必填标记', JSON.stringify(h5Fs))
+  assert(h5Fs.every(f => h5Snap.missingRequired.some(x => x.startsWith(f.ref + ':'))), 'H5d 各段进 missingRequired')
+  assert(h5Fs.every(f => f.error === '必須項目です'), 'H5e 各段能读到外层校验错误')
+  for (const f of h5Fs) await execTool('fill_text', { ref: f.ref, value: '03' })
+  eq([...h5.querySelectorAll('input')].filter(i => i.value === '03').length, 3, 'H5b 3 段都能写入')
+  h5.remove()
+
+  // ===== I. 修复回归（空 option / aria-invalid 容器 / disabled 选项 / 原生 month / hidden 干扰）=====
+  out.push('<div class="section">I. 修复回归</div>')
+
+  // I1: 空 option 显式报错（修复前 includes('') 恒真 → 静默选第一个，掩盖参数缺失）
+  // 注意用新快照的 ref：旧 ref 已跨快照失效（H1），失效也会 ok=false，区分不了是否命中新守卫
+  const cityF2 = buildSnapshot().fields.find(f => f.label === '都道府県')
+  const i1 = await execTool('choose_option', { ref: cityF2.ref, option: '' })
+  eq(i1.ok, false, 'I1 空 option 显式失败')
+  eq(document.getElementById('f-city').value, 'fukuoka', 'I1b 空 option 未静默改选（仍是 B3 的福岡）')
+
+  // I2: aria-invalid 挂在容器上不当错误文本；控件自身被标 → 明确信号
+  const i2 = document.createElement('div')
+  i2.innerHTML = '<div class="i2wrap" aria-invalid="true"><label for="i2i">aria容器</label><input id="i2i" type="text"><span>必須ですよ</span></div>'
+  form2.appendChild(i2)
+  const i2F = buildSnapshot().fields.find(f => f.label === 'aria容器')
+  assert(i2F && !/必須ですよ/.test(i2F.error || ''), 'I2 容器 aria-invalid 不把整段文本当错误', JSON.stringify(i2F && i2F.error))
+  i2.querySelector('input').setAttribute('aria-invalid', 'true')
+  const i2F2 = buildSnapshot().fields.find(f => f.label === 'aria容器')
+  assert(i2F2 && /aria-invalid/.test(i2F2.error || ''), 'I2b 控件自身 aria-invalid → 明确信号', JSON.stringify(i2F2 && i2F2.error))
+  i2.remove()
+
+  // I3: disabled 选项不进快照 options（与 choose_option 口径一致）
+  const i3 = document.createElement('div')
+  i3.innerHTML = '<label><input type="radio" name="i3r">有効</label><label><input type="radio" name="i3r" disabled>無効</label>'
+  form2.appendChild(i3)
+  const i3F = buildSnapshot().fields.find(f => (f.label || '').includes('有効'))
+  assert(i3F && i3F.kind === 'radio' && (i3F.options || []).length === 1, 'I3 disabled 选项不进 options', JSON.stringify(i3F && i3F.options))
+  i3.remove()
+
+  // I4: 原生 input[type=month] 归类 date 且 set_date 可设 YYYY-MM（修复前是死路）
+  const i4 = document.createElement('div')
+  i4.innerHTML = '<label for="i4m">開始月</label><input id="i4m" type="month">'
+  form2.appendChild(i4)
+  const i4F = buildSnapshot().fields.find(f => f.label === '開始月')
+  assert(i4F && i4F.kind === 'date', 'I4 原生 month 识别为 date')
+  if (i4F) {
+    const i4r = await execTool('set_date', { ref: i4F.ref, year: 2025, month: 3, day: 1 })
+    eq(i4r.ok, true, 'I4b month set_date ok', JSON.stringify(i4r))
+    eq(document.getElementById('i4m').value, '2025-03', 'I4c value=2025-03')
+  }
+  i4.remove()
+
+  // I5: hidden input 不干扰 valueOf/fill_text（修复前 hidden 排在前面会被读成 SECRET → 假 filled）
+  const i5 = document.createElement('div')
+  i5.innerHTML = '<input type="hidden" name="i5h" value="SECRET"><label for="i5t">可见字段</label><input id="i5t" type="text">'
+  form2.appendChild(i5)
+  const i5F = buildSnapshot().fields.find(f => f.label === '可见字段')
+  assert(i5F && i5F.filled === false, 'I5 hidden input 不当已填值', JSON.stringify(i5F))
+  const i5r = await execTool('fill_text', { ref: i5F.ref, value: '書いた' })
+  eq(document.getElementById('i5t').value, '書いた', 'I5b fill 落到可见 input 而非 hidden')
+  i5.remove()
 
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length

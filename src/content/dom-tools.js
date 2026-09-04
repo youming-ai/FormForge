@@ -104,9 +104,9 @@ async function fillText (ref, value) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   ensureVisible(r.item)
-  // 防误用：上传/日期/单选/复选/开关/卡片不适用 fill_text（select 保留：搜索型下拉需要键入过滤；数字框允许：走回读校验）
-  if (['upload', 'date', 'radio', 'checkbox', 'switch', 'cards'].includes(r.kind)) {
-    return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、radio/checkbox/switch/cards→choose_option` }
+  // 防误用：这些类型 fill_text 都不生效（select 键入只是过滤搜索文本，随后 blur 会清空 → 静默假成功）；数字框允许，走回读校验
+  if (['upload', 'date', 'radio', 'checkbox', 'switch', 'cards', 'select'].includes(r.kind)) {
+    return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、select/radio/checkbox/switch/cards→choose_option（需要按关键词找选项时先 read_options(ref, query)）` }
   }
   // contenteditable 富文本：直接写 textContent + 派发 input/change
   if (r.kind === 'richtext') {
@@ -120,7 +120,7 @@ async function fillText (ref, value) {
     await sleep(50)
     return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
   }
-  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('.ant-input-number-input, textarea, input')
+  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('.ant-input-number-input, textarea, input:not([type="hidden"])')
   if (!input) return { ok: false, result: '该字段不是文本框' }
   setNativeValue(input, value)
   await sleep(30)
@@ -144,6 +144,9 @@ async function chooseOption (ref, option) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   ensureVisible(r.item)
+  // 空 option 在文本匹配 includes('') 恒真下会「静默选第一个」，掩盖参数缺失 → 显式报错让模型改参数
+  const want = String(option ?? '').trim()
+  if (!want) return { ok: false, result: 'option 不能为空：select/radio 传选项文本或 "first"、checkbox 传 check/uncheck、switch 传 on/off' }
 
   if (r.kind === 'select') {
     // 原生 <select>：直接设值（不走 Ant 互斥锁/浮层逻辑）
@@ -217,15 +220,22 @@ async function chooseOption (ref, option) {
           return { ok: false, result: `未找到选项「${option}」。当前可选：${list}` }
         }
         const wanted = optText(target)
+        const before = norm(selectedTexts()[0] || '')
 
         if (attempt === 1) {
           pressEl(target) // 完整按下序列（rc-select 在 mousedown 上响应选择）
         } else {
           await kbSelect() // 键盘兜底
         }
-        // 回读校验：选中项出现且文本匹配（whitespace 归一化 + 双向 includes 容错）
+        // 回读校验：精确相等直接通过；双向 includes 容错仅在值确实变化后生效
+        // （否则旧值「1」是目标「12」的子串，点击没生效也会被判成功）
         const verified = await waitFor(
-          () => selectedTexts().some(t => norm(t) && (norm(t) === norm(wanted) || norm(t).includes(norm(wanted)) || norm(wanted).includes(norm(t)))),
+          () => selectedTexts().some(t => {
+            const nt = norm(t)
+            if (!nt) return false
+            if (nt === norm(wanted)) return true
+            return nt !== before && (nt.includes(norm(wanted)) || norm(wanted).includes(nt))
+          }),
           { timeout: 800, step: 50 })
         if (verified) {
           const got = selectedTexts()[0] || wanted
@@ -240,46 +250,53 @@ async function chooseOption (ref, option) {
   }
 
   if (r.kind === 'radio') {
-    const wraps = [...r.item.querySelectorAll('.ant-radio-wrapper')]
+    const wraps = [...r.item.querySelectorAll('.ant-radio-wrapper')].filter(w => !w.classList.contains('ant-radio-wrapper-disabled'))
     // 原生 radio（无 Ant wrapper）：按文本/值找 input 点击（radio 天然互斥）
     if (!wraps.length) {
-      const radios = [...r.item.querySelectorAll('input[type="radio"]')]
-      if (!radios.length) return { ok: false, result: '该字段没有可选项' }
-      const by = i => (i.closest('label')?.textContent || i.value || '').trim()
+      const radios = [...r.item.querySelectorAll('input[type="radio"]')].filter(i => !i.disabled)
+      if (!radios.length) return { ok: false, result: '该字段没有可选项（或全部被禁用）' }
+      const by = optionTextOf // 与快照同一口径（含 label[for]）
       const want = String(option ?? '').trim()
       const target = /^(random|随机|任意)$/i.test(want) ? radios[Math.floor(Math.random() * radios.length)]
         : (radios.find(i => by(i) === want) || radios.find(i => by(i).includes(want)))
       if (!target) return { ok: false, result: `未找到单选项「${option}」，可选：${radios.map(by).join(' / ')}` }
       target.click()
-      await waitFor(() => target.checked, { timeout: 400, step: 40 })
+      if (!await waitFor(() => target.checked, { timeout: 400, step: 40 })) {
+        return { ok: false, result: `单选「${by(target)}」点击后未选中，请 get_form 复核` }
+      }
       return { ok: true, result: `已选「${labelOf(r.item) || r.ref || ''}」= ${by(target)}` }
     }
     const w = wraps.find(x => x.textContent.trim() === option) || wraps.find(x => x.textContent.trim().includes(option))
     if (!w) return { ok: false, result: `未找到单选项「${option}」，可选：${wraps.map(x => x.textContent.trim()).join(' / ')}` }
     w.click()
-    await waitFor(() => !!w.querySelector('.ant-radio-checked') || w.classList.contains('ant-radio-wrapper-checked'), { timeout: 400, step: 40 })
+    if (!await waitFor(() => !!w.querySelector('.ant-radio-checked') || w.classList.contains('ant-radio-wrapper-checked'), { timeout: 400, step: 40 })) {
+      return { ok: false, result: `单选「${w.textContent.trim()}」点击后未选中，请 get_form 复核` }
+    }
     return { ok: true, result: `已选「${labelOf(r.item)}」= ${w.textContent.trim()}` }
   }
 
   if (r.kind === 'checkbox') {
-    const wraps = [...r.item.querySelectorAll('.ant-checkbox-wrapper')]
+    // 滤 disabled：与快照 radioOptionsOf/checkboxOptionsOf 的可用性口径一致（禁用项不进 options，也不该出现在勾选目标里）
+    const wraps = [...r.item.querySelectorAll('.ant-checkbox-wrapper')].filter(w => !w.classList.contains('ant-checkbox-wrapper-disabled'))
     // 原生 checkbox（无 Ant wrapper）
     if (!wraps.length) {
-      const inputs = [...r.item.querySelectorAll('input[type="checkbox"]')]
-      if (!inputs.length) return { ok: false, result: '该字段没有复选框' }
-      const by = i => (i.closest('label')?.textContent || i.value || '').trim()
+      const inputs = [...r.item.querySelectorAll('input[type="checkbox"]')].filter(i => !i.disabled)
+      if (!inputs.length) return { ok: false, result: '该字段没有复选框（或全部被禁用）' }
+      const by = optionTextOf // 与快照同一口径（含 label[for]）
       if (option === 'check' || option === 'uncheck') {
         const want = option === 'check'
         let n = 0
         inputs.forEach(i => { if (i.checked !== want) { i.click(); n++ } })
-        await waitFor(() => inputs.every(i => i.checked === want), { timeout: 600, step: 40 })
+        if (!await waitFor(() => inputs.every(i => i.checked === want), { timeout: 600, step: 40 })) {
+          return { ok: false, result: `复选框未全部到达目标状态（当前勾选 ${inputs.filter(i => i.checked).length}/${inputs.length}），请 get_form 复核` }
+        }
         if (n === 0) return { ok: true, result: `复选框已是目标状态（当前勾选 ${inputs.filter(i => i.checked).length}/${inputs.length}）` }
         return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框` }
       }
       const w = inputs.find(i => by(i).includes(option))
       if (!w) return { ok: false, result: `未找到复选项「${option}」` }
       if (!w.checked) w.click()
-      await waitFor(() => w.checked, { timeout: 400, step: 40 })
+      if (!await waitFor(() => w.checked, { timeout: 400, step: 40 })) return { ok: false, result: `「${option}」勾选未生效，请 get_form 复核` }
       return { ok: true, result: `「${option}」已勾选` }
     }
     const checkedNow = () => wraps.filter(w => w.querySelector('.ant-checkbox-checked')).length
@@ -291,15 +308,19 @@ async function chooseOption (ref, option) {
         if (checked !== want) { (w.querySelector('input.ant-checkbox-input') || w).click(); n++ }
       })
       // 等 Vue 更新到目标状态（早退），避免下一次 get_form 读到旧状态导致反复勾选
-      await waitFor(() => wraps.every(w => !!w.querySelector('.ant-checkbox-checked') === want), { timeout: 600, step: 40 })
+      if (!await waitFor(() => wraps.every(w => !!w.querySelector('.ant-checkbox-checked') === want), { timeout: 600, step: 40 })) {
+        return { ok: false, result: `复选框未全部到达目标状态（当前勾选 ${checkedNow()}/${wraps.length}），请 get_form 复核` }
+      }
       if (n === 0) return { ok: true, result: `复选框已是目标状态（无需改动，当前勾选 ${checkedNow()}/${wraps.length}），请前进到下一项` }
       return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框（当前勾选 ${checkedNow()}/${wraps.length}）` }
     }
     const w = wraps.find(x => x.textContent.trim().includes(option))
     if (!w) return { ok: false, result: `未找到复选项「${option}」` }
     if (!w.querySelector('.ant-checkbox-checked')) (w.querySelector('input.ant-checkbox-input') || w).click()
-    await waitFor(() => !!w.querySelector('.ant-checkbox-checked'), { timeout: 400, step: 40 })
-    return { ok: true, result: `「${option}」当前${w.querySelector('.ant-checkbox-checked') ? '已勾选' : '未勾选'}` }
+    if (!await waitFor(() => !!w.querySelector('.ant-checkbox-checked'), { timeout: 400, step: 40 })) {
+      return { ok: false, result: `「${option}」勾选未生效（可能被禁用），请 get_form 复核` }
+    }
+    return { ok: true, result: `「${option}」已勾选` }
   }
 
   if (r.kind === 'switch') {
@@ -329,7 +350,9 @@ async function chooseOption (ref, option) {
     const card = cards.find(c => titleOf(c) === option) || cards.find(c => titleOf(c).includes(option))
     if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(titleOf).join(' / ')}` }
     card.click()
-    await waitFor(() => activeOf(card), { timeout: 500, step: 50 })
+    if (!await waitFor(() => activeOf(card), { timeout: 500, step: 50 })) {
+      return { ok: false, result: `卡片「${titleOf(card)}」点击后未变选中态，请 get_form 复核` }
+    }
     return { ok: true, result: `已选卡片「${titleOf(card)}」` }
   }
 
@@ -394,15 +417,14 @@ async function uploadFile (ref) {
       : { ok: false, result: '文件未能写入 input.files，需人工处理。' }
   }
   // 等上传项出现且上传结束（上传中带 .ant-upload-list-item-uploading）：快则早退，慢则最多 12s
-  await waitFor(() => {
-    const items = [...r.item.querySelectorAll('.ant-upload-list-item')]
-    return items.length > n0 && items.every(it => !it.classList.contains('ant-upload-list-item-uploading'))
-  }, { timeout: 12000, step: 120 })
-  const n = r.item.querySelectorAll('.ant-upload-list-item').length
+  // maxCount=1 的替换式列表数量不会增长，所以「按文件名命中」与「数量增长」任一成立即算落列表
+  const items = () => [...r.item.querySelectorAll('.ant-upload-list-item')]
+  const landed = () => { const it = items(); return it.length > n0 || it.some(x => (x.textContent || '').includes(file.name)) }
+  await waitFor(() => landed() && items().every(x => !x.classList.contains('ant-upload-list-item-uploading')), { timeout: 12000, step: 120 })
   const err = r.item.querySelector('.ant-upload-list-item-error')
   if (err) return { ok: false, result: `上传可能失败（列表项标红）。该字段或只接受特定类型(如 PDF)，需人工。` }
-  if (n <= n0) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝），需人工处理。' }
-  return { ok: true, result: `已上传「${file.name}」，当前列表 ${n} 个文件；稍后可 get_form 复核。` }
+  if (!landed()) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝），需人工处理。' }
+  return { ok: true, result: `已上传「${file.name}」，当前列表 ${items().length} 个文件；稍后可 get_form 复核。` }
 }
 
 // 点任意按钮/元素（如「住所自動入力」），ref 来自 get_form 的 actions/fields
@@ -413,14 +435,18 @@ async function clickElement (ref) {
   ensureVisible(r.item)
   const el = r.item.matches('button') ? r.item : (r.item.querySelector('button') || r.item)
   const label = (r.item.textContent || '').trim()
+  // 安全红线：字段 ref 里也可能藏着提交按钮（Form.Item 包的 htmlType=submit、原生 form 单元）
+  if (isSubmitLabel(el.textContent || el.value)) return { ok: false, result: `「${(el.textContent || el.value || '').trim()}」疑似最终提交按钮，已硬拦截（绝不提交）；填写完成请调用 finish` }
   // 「自动带入地址 / 邮编搜索 / 自动填充」等异步按钮：轮询等表单值变化，有变化立即返回
   // 多语言：住所自動入力 / 自动带入 / 自动填充 / 搜索 / lookup / autofill / geocode 等
   if (/住所|自動入力|自动|邮编|郵便|検索|查询|搜索|地址|lookup|search|autofill|auto.?fill|auto.?complete|fetch|populate|geocode|find/i.test(label)) {
+    // select 也在对比内：自动带入可能填的是下拉（都道府県等），只看 input 会误报「未检测到值变化」
     const scope = scopeEl()
-    const before = [...scope.querySelectorAll('input')].map(i => i.value)
+    const vals = () => [...scope.querySelectorAll('input, select')].map(i => i.value)
+    const before = vals()
     el.click()
     const changed = await waitFor(() => {
-      const now = [...scope.querySelectorAll('input')].map(i => i.value)
+      const now = vals()
       return now.length !== before.length || now.some((v, i) => v !== before[i])
     }, { timeout: 3000, step: 100 })
     await sleep(150)
@@ -487,14 +513,12 @@ async function readOptions (ref, query = '') {
 // 纯函数：按 placeholder 推断日期键入候选（首个为最可能格式），供 setDate 逐个尝试。
 // 覆盖：YYYY/MM/DD、MM/DD/YYYY、DD/MM/YYYY、YYYY年MM月DD日（日文）、示例日期/空（默认年优先）。
 function dateCandidates (ph, y, m, d) {
-  const norm = s => String(s || '').replace(/[^0-9]/g, '')
   ph = String(ph || '').trim()
   // 日文年月日（placeholder 含 年/月/日，如「YYYY年MM月DD日」）：优先键入汉字格式，再回退斜杠/年-月-日
   if (/年/.test(ph)) {
-    const candidates = [`${y}年${pad2(m)}月${pad2(d)}日`, `${y}年${m}月${d}日`, `${y}/${pad2(m)}/${pad2(d)}`, `${y}-${pad2(m)}-${pad2(d)}`]
-    return { candidates, want: norm(candidates[0]) }
+    return { candidates: [`${y}年${pad2(m)}月${pad2(d)}日`, `${y}年${m}月${d}日`, `${y}/${pad2(m)}/${pad2(d)}`, `${y}-${pad2(m)}-${pad2(d)}`] }
   }
-  const sep = ph.includes('-') ? '-' : ph.includes('.') ? '.' : '/'
+  const sep = ph.includes('-') ? '-' : ph.includes('.') ? '.' : ph.includes('/') ? '/' : '-'
   const up = ph.toUpperCase()
   // 按 Y/M/D token 在 placeholder 中的首次出现位置排序（YYYY/MM/DD→ymd、MM/DD/YYYY→mdy、DD/MM/YYYY→dmy）；
   // 无字母 token（示例日期如 2024/01/31 或空）→ 默认年优先，回退候选覆盖其它常见格式。
@@ -506,23 +530,27 @@ function dateCandidates (ph, y, m, d) {
     order = ['y', 'm', 'd']
   }
   // 按 order 首字母排年月日：y=年优先(ymd)、m=月优先(mdy)、d=日优先(dmy)
-  const P = { y, m, d }
+  // 月日一律补零：rc-picker 用 dayjs 严格模式解析，format 为 MM/DD 时「4/5」直接判无效
+  const P = { y, m: pad2(m), d: pad2(d) }
   const fmt = (s, o) => {
     const seq = o === 'y' ? ['y', 'm', 'd'] : o === 'm' ? ['m', 'd', 'y'] : ['d', 'm', 'y']
     return seq.map(k => P[k]).join(s)
   }
   const candidates = order.map(o => fmt(sep, o))
-  return { candidates, want: norm(candidates[0]) }
+  // placeholder 完全没给分隔符线索时，斜杠格式也试一次
+  if (!/[-./]/.test(ph)) candidates.push(fmt('/', order[0]))
+  return { candidates }
 }
 
 async function setDate (ref, y, m, d) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   ensureVisible(r.item)
-  // 原生 date input：直接设 YYYY-MM-DD
-  const native = r.item.querySelector('input[type="date"]') || (r.item.matches?.('input[type="date"]') ? r.item : null)
+  // 原生 date/month input：直接设值（month 粒度只设年月，日被控件忽略）
+  const native = r.item.querySelector('input[type="date"], input[type="month"]') ||
+    (r.item.matches?.('input[type="date"], input[type="month"]') ? r.item : null)
   if (native) {
-    const v = `${y}-${pad2(m)}-${pad2(d)}`
+    const v = native.type === 'month' ? `${y}-${pad2(m)}` : `${y}-${pad2(m)}-${pad2(d)}`
     setNativeValue(native, v)
     await sleep(100)
     return native.value === v
@@ -531,9 +559,11 @@ async function setDate (ref, y, m, d) {
   }
   const input = r.item.querySelector('.ant-picker-input input')
   if (!input) return { ok: false, result: '该字段不是日期选择器' }
-  const norm = s => String(s || '').replace(/[^0-9]/g, '')
+  // 按数字序列比对：「2024/04/05」「2024/4/5」「2024年4月5日」等价，但保序 → 04/05 与 05/04 不会互相误判
+  // 只取前 3 组数字：带 showTime 的选择器回显「2024-04-05 00:00」，比全量数字会误判成失败
+  const dnum = s => (String(s || '').match(/\d+/g) || []).slice(0, 3).map(Number).join('-')
   // 日期格式按 placeholder 推断（含日文 YYYY年MM月DD日），再按常见格式回退，避免写死单一格式
-  const { candidates, want } = dateCandidates(input.getAttribute('placeholder') || '', y, m, d)
+  const { candidates } = dateCandidates(input.getAttribute('placeholder') || '', y, m, d)
 
   for (const v of candidates) {
     input.focus()
@@ -548,7 +578,7 @@ async function setDate (ref, y, m, d) {
     document.body.click() // 关闭面板
     await sleep(120)
     const got = (r.item.querySelector('.ant-picker-input input')?.value || '').trim()
-    if (got && norm(got) === want) return { ok: true, result: `已设日期「${labelOf(r.item)}」= ${got}` }
+    if (got && dnum(got) === dnum(v)) return { ok: true, result: `已设日期「${labelOf(r.item)}」= ${got}` }
   }
 
   const got = (r.item.querySelector('.ant-picker-input input')?.value || '').trim()
@@ -638,6 +668,9 @@ async function clickButton (target) {
   if (target !== 'back' && isSubmitLabel(label)) {
     return { ok: false, result: `「${label}」疑似最终提交按钮，已硬拦截（安全红线：绝不提交）。若确是中间步骤按钮，请用 finish 说明留人工。` }
   }
+  // 「〜して次へ」类按钮靠导航词优先放行，但它实为最后一步的提交按钮时点击即真提交；
+  // MPA 下提交后本文档直接销毁、无从复核 → 在结果里显式警示，让模型下一步 get_form 复核并随时止损
+  const risky = SUBMIT_WORDS.test(normLabel(label))
 
   // 轮询等步骤/表单变化（标题/确认页/控件数量/值签名），有变化早退。
   // 签名只算 scope 内控件（全页面计算在长表单上是 O(n) 每轮 × 19 次轮询的开销）
@@ -652,9 +685,17 @@ async function clickButton (target) {
   }, { timeout: 1500, step: 80 })
   // 等新步骤渲染出表单控件（早退），替代固定 sleep
   await waitFor(() => !!document.querySelector('.ant-form-item, form, input, select, textarea'), { timeout: 800, step: 60 })
-  const err = document.querySelector('.ant-form-item-explain-error, .invalid-feedback, [class*="form-error"], [class*="invalid"]')
-  if (err) return { ok: true, result: `已点「${label}」，但出现校验错误：${(err.textContent || '').trim()}（请 get_form 复核并修正）` }
-  return { ok: true, result: changed ? `已点「${label}」（请 get_form 查看新状态）` : `已点「${label}」（未检测到步骤变化，可能校验未过，请 get_form 复核）` }
+  // 不用 [class*="invalid"]：会捞到 class 含 invalid 的任意无关节点（如 invalid-handle）产生假错误
+  const errText = [...document.querySelectorAll('.ant-form-item-explain-error, .invalid-feedback, [class*="form-error"], .error-message, .field-error')]
+    .filter(visible).map(e => (e.textContent || '').trim()).find(Boolean)
+  const caution = risky ? '。注意：该按钮文案同时含提交词与导航词，若它实为最终提交按钮，请立即停止并调用 finish 说明' : ''
+  if (errText) return { ok: true, result: `已点「${label}」，但出现校验错误：${errText}（请 get_form 复核并修正）${caution}` }
+  return {
+    ok: true,
+    result: changed
+      ? `已点「${label}」（请 get_form 查看新状态）${caution}`
+      : `已点「${label}」（未检测到步骤变化，可能校验未过，请 get_form 复核）${caution}`,
+  }
 }
 
 // 工具分发：background 下发的 agent:exec 按名字路由到这里

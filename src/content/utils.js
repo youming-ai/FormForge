@@ -36,6 +36,7 @@ function setInputValue (el, value) {
 
 // 可见性：offsetParent 对 position:fixed 元素恒为 null（弹窗/悬浮表单会被误判不可见），
 // 改用渲染盒尺寸判断（display:none / 宽高为 0 → 不可见），并优先用原生 checkVisibility。
+// checkOpacity:false：淡入淡出动画中的半透明字段仍算可见（可交互），不因 opacity<1 漏扫
 const visible = el => {
   if (!el) return false
   if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: false })

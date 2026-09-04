@@ -204,21 +204,25 @@ async function mergeSettings (patch) {
   await chrome.storage.local.set({ agentSettings: { ...(agentSettings || {}), ...patch } })
 }
 
-function saveCfg (silent) {
+async function saveCfg (silent) {
   // 三项直写（含空字符串）：getSettings 会把空串过滤回退默认，清空输入 = 恢复默认
   const patch = {
     endpoint: ui.endpoint.value.trim(),
     model: ui.model.value.trim(),
     baseEmail: ui.baseemail.value.trim(),
   }
-  mergeSettings(patch).then(() => {
-    if (silent) {
-      if (ui.savedtip) {
-        ui.savedtip.textContent = '保存済み'
-        setTimeout(() => { ui.savedtip.textContent = '' }, 1500)
-      }
-    } else setStatus('設定を保存しました')
-  })
+  try {
+    await mergeSettings(patch)
+  } catch (_) {
+    setStatus('設定の保存に失敗（ストレージ容量超過の可能性）')
+    return
+  }
+  if (silent) {
+    if (ui.savedtip) {
+      ui.savedtip.textContent = '保存済み'
+      setTimeout(() => { ui.savedtip.textContent = '' }, 1500)
+    }
+  } else setStatus('設定を保存しました')
 }
 
 function onPickImage () {
@@ -229,6 +233,7 @@ function onPickImage () {
   reader.onload = () => {
     mergeSettings({ uploadImage: { dataUrl: reader.result, name: file.name, type: file.type } })
       .then(() => { ui.uploadimgname.textContent = `設定中の画像：${file.name}`; ui.uploadimgname.hidden = false; ui.rmimg.hidden = false; setStatus('固定テスト画像を保存しました') })
+      .catch(() => setStatus('画像の保存に失敗（4MB でもストレージ容量を超過する可能性）'))
   }
   reader.readAsDataURL(file)
 }
@@ -236,6 +241,7 @@ function onPickImage () {
 function onRemoveImage () {
   mergeSettings({ uploadImage: null })
     .then(() => { ui.uploadimgname.textContent = ''; ui.uploadimgname.hidden = true; ui.rmimg.hidden = true; setStatus('ダミー画像の自動生成に戻しました') })
+    .catch(() => setStatus('画像の解除に失敗しました'))
 }
 
 function onMainButton () {
@@ -246,8 +252,9 @@ function onMainButton () {
   onStart()
 }
 
-function onStart () {
-  saveCfg(true)
+async function onStart () {
+  // 先落盘再启动：避免 sendMessage 先于 storage.set 落地，runAgent 的 getSettings 读到旧 endpoint
+  await saveCfg(true)
   ui.log.innerHTML = ''
   setRunning(true)
   const baseEmail = ui.baseemail.value.trim() || detectUserEmail()
