@@ -1,4 +1,4 @@
-// system-prompt.js —— 构造 agent 的 system prompt（通用表单填写 + 多模态识图）
+// system-prompt.js —— 构造 agent 的 system prompt（通用表单填写 · 纯 DOM 方案）
 
 // 通用字段/格式指南（语言自适应：先判断表单语言，再按该语言规则填值）
 const FIELD_GUIDE = `

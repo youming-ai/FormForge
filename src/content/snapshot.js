@@ -39,7 +39,7 @@ const scopeEl = () => pickScope()
 // 通用启发式：范围内没有可编辑控件（含 contenteditable 富文本）+ 页面出现「最终提交」类按钮。
 const isConfirm = () => {
   const scope = scopeEl()
-  const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')]
+  const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')]
     .filter(el => visible(el) && !el.disabled && !['hidden', 'button', 'submit', 'reset', 'image', 'file'].includes(el.type || ''))
   if (editable.length) return false
   // 开关是 button 元素（无 input 子元素）：纯开关步骤 + 提交词按钮不能误判为确认页
@@ -80,7 +80,7 @@ function classify (item) {
   if (item.querySelector('.ant-switch')) return 'switch'
   if (item.querySelector('input:not([type="file"])')) return 'text'
   // contenteditable 富文本（div[contenteditable] 等，现代表单常见）
-  if (item.matches?.('[contenteditable="true"], [contenteditable=""]') || item.querySelector('[contenteditable="true"], [contenteditable=""]')) return 'richtext'
+  if (item.matches?.('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]') || item.querySelector('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')) return 'richtext'
   return 'unknown'
 }
 
@@ -221,7 +221,7 @@ const unitBox = el => {
 // 原生控件 → 字段单元：radio/checkbox 尝试按 name 在组容器（fieldset/[role]/ul/table）内聚合；
 // 其余取最近 label 或父元素为单元。已被 Ant 路径覆盖的控件跳过。
 function nativeFieldUnits (scope, covered) {
-  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""], button[role="switch"], button.ant-switch')]
+  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"], button[role="switch"], button.ant-switch')]
     .filter(el => visible(el) && !el.disabled)
     // type 黑名单只对 input 生效：button 的 type 默认 submit，不能沿用 input 语义过滤
     .filter(el => el.tagName !== 'INPUT' || !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
@@ -278,11 +278,13 @@ function findCardGroups (scope) {
 // 目标表单以日文为主：检测不到时默认按日文处理（多语言能力保留，prompt 按 lang 自适应）
 const DEFAULT_LANG = 'ja'
 function detectLang (doc = document) {
-  const htmlLang = (doc.documentElement?.getAttribute('lang') || '').trim()
-  if (htmlLang) return htmlLang
   const t = (doc.body?.textContent || '').slice(0, 2000)
+  // 假名/谚文是日/韩独有文字：html[lang] 标错时（日文表单标 en 很常见）以页面文本为准
   if (/[\u3040-\u30ff]/.test(t)) return 'ja'
   if (/[\uac00-\ud7af]/.test(t)) return 'ko'
+  const htmlLang = (doc.documentElement?.getAttribute('lang') || '').trim()
+  if (htmlLang) return htmlLang
+  // 汉字 zh/ja 共用有歧义：只在没有 html[lang] 线索时才按文本判 zh
   if (/[\u4e00-\u9fff]/.test(t)) return 'zh'
   return ''
 }
@@ -364,18 +366,26 @@ function buildSnapshot () {
     ...document.querySelectorAll('button, input[type="submit"], [role="button"], a.ant-btn, .ant-steps-action button')
   ])).filter(visible)
 
-  allNavElements.slice(0, 15).forEach(b => {
+  const btnEntries = []
+  allNavElements.forEach(b => {
     const t = (b.textContent || b.value || '').trim()
     if (!t) return
     const forbidden = isSubmitLabel(t)
     const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('ant-btn-disabled') || b.classList.contains('is-disabled')
-    buttons.push({
+    btnEntries.push({
       label: t,
       kind: forbidden ? 'submit' : ((b.type === 'submit' || /primary|main/i.test(b.className)) ? 'primary' : 'default'),
       disabled: !!disabled,
       forbidden, // 最终提交类：点击会被硬拦截
     })
   })
+  // 头部导航按钮多时前 15 个可能全是页头菜单：提交词/主按钮优先入列，其余按文档序补足
+  const rank = e => (e.forbidden ? 2 : 0) + (e.kind === 'primary' ? 1 : 0)
+  buttons.push(...btnEntries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => rank(b.e) - rank(a.e) || a.i - b.i)
+    .slice(0, 15)
+    .map(x => x.e))
 
   // 5) 步骤内其它可点按钮（如「住所自動入力」/「自动带入地址」），给 ref 供 click 使用
   // 口径与 buttons 一致：原生 button + [role=button] + a 按钮；上限 20 个控制快照 token

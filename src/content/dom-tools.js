@@ -158,7 +158,6 @@ async function chooseOption (ref, option) {
       const real = all.filter(o => o.value !== '')
       const opts = (real.length ? real : all).map(o => ({ o, t: (o.textContent || o.value).trim() }))
       if (!opts.length) return { ok: false, result: '该下拉没有可选项' }
-      const want = String(option ?? '').trim()
       const hit = /^(random|随机|任意)$/i.test(want) ? opts[Math.floor(Math.random() * opts.length)]
         : /^(first|第一个|默认)$/i.test(want) ? opts[0]
         : (opts.find(x => x.t === want) || opts.find(x => x.t.includes(want)))
@@ -256,18 +255,17 @@ async function chooseOption (ref, option) {
       const radios = [...r.item.querySelectorAll('input[type="radio"]')].filter(i => !i.disabled)
       if (!radios.length) return { ok: false, result: '该字段没有可选项（或全部被禁用）' }
       const by = optionTextOf // 与快照同一口径（含 label[for]）
-      const want = String(option ?? '').trim()
       const target = /^(random|随机|任意)$/i.test(want) ? radios[Math.floor(Math.random() * radios.length)]
         : (radios.find(i => by(i) === want) || radios.find(i => by(i).includes(want)))
-      if (!target) return { ok: false, result: `未找到单选项「${option}」，可选：${radios.map(by).join(' / ')}` }
+      if (!target) return { ok: false, result: `未找到单选项「${want}」，可选：${radios.map(by).filter(Boolean).join(' / ')}` }
       target.click()
       if (!await waitFor(() => target.checked, { timeout: 400, step: 40 })) {
         return { ok: false, result: `单选「${by(target)}」点击后未选中，请 get_form 复核` }
       }
       return { ok: true, result: `已选「${labelOf(r.item) || r.ref || ''}」= ${by(target)}` }
     }
-    const w = wraps.find(x => x.textContent.trim() === option) || wraps.find(x => x.textContent.trim().includes(option))
-    if (!w) return { ok: false, result: `未找到单选项「${option}」，可选：${wraps.map(x => x.textContent.trim()).join(' / ')}` }
+    const w = wraps.find(x => x.textContent.trim() === want) || wraps.find(x => x.textContent.trim().includes(want))
+    if (!w) return { ok: false, result: `未找到单选项「${want}」，可选：${wraps.map(x => x.textContent.trim()).join(' / ')}` }
     w.click()
     if (!await waitFor(() => !!w.querySelector('.ant-radio-checked') || w.classList.contains('ant-radio-wrapper-checked'), { timeout: 400, step: 40 })) {
       return { ok: false, result: `单选「${w.textContent.trim()}」点击后未选中，请 get_form 复核` }
@@ -293,11 +291,11 @@ async function chooseOption (ref, option) {
         if (n === 0) return { ok: true, result: `复选框已是目标状态（当前勾选 ${inputs.filter(i => i.checked).length}/${inputs.length}）` }
         return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框` }
       }
-      const w = inputs.find(i => by(i).includes(option))
-      if (!w) return { ok: false, result: `未找到复选项「${option}」` }
+      const w = inputs.find(i => by(i).includes(want))
+      if (!w) return { ok: false, result: `未找到复选项「${want}」` }
       if (!w.checked) w.click()
-      if (!await waitFor(() => w.checked, { timeout: 400, step: 40 })) return { ok: false, result: `「${option}」勾选未生效，请 get_form 复核` }
-      return { ok: true, result: `「${option}」已勾选` }
+      if (!await waitFor(() => w.checked, { timeout: 400, step: 40 })) return { ok: false, result: `「${want}」勾选未生效，请 get_form 复核` }
+      return { ok: true, result: `「${want}」已勾选` }
     }
     const checkedNow = () => wraps.filter(w => w.querySelector('.ant-checkbox-checked')).length
     if (option === 'check' || option === 'uncheck') {
@@ -314,13 +312,13 @@ async function chooseOption (ref, option) {
       if (n === 0) return { ok: true, result: `复选框已是目标状态（无需改动，当前勾选 ${checkedNow()}/${wraps.length}），请前进到下一项` }
       return { ok: true, result: `已${want ? '勾选' : '取消'} ${n} 个复选框（当前勾选 ${checkedNow()}/${wraps.length}）` }
     }
-    const w = wraps.find(x => x.textContent.trim().includes(option))
-    if (!w) return { ok: false, result: `未找到复选项「${option}」` }
+    const w = wraps.find(x => x.textContent.trim().includes(want))
+    if (!w) return { ok: false, result: `未找到复选项「${want}」` }
     if (!w.querySelector('.ant-checkbox-checked')) (w.querySelector('input.ant-checkbox-input') || w).click()
     if (!await waitFor(() => !!w.querySelector('.ant-checkbox-checked'), { timeout: 400, step: 40 })) {
-      return { ok: false, result: `「${option}」勾选未生效（可能被禁用），请 get_form 复核` }
+      return { ok: false, result: `「${want}」勾选未生效（可能被禁用），请 get_form 复核` }
     }
-    return { ok: true, result: `「${option}」已勾选` }
+    return { ok: true, result: `「${want}」已勾选` }
   }
 
   if (r.kind === 'switch') {
@@ -347,8 +345,8 @@ async function chooseOption (ref, option) {
     const cards = r.cards || [...r.item.querySelectorAll('[role="radio"], [role="option"]')]
     const titleOf = r.titleOf || (c => (c.textContent || '').trim())
     const activeOf = r.activeOf || (c => c.getAttribute('aria-checked') === 'true' || c.classList.contains('active') || c.classList.contains('selected'))
-    const card = cards.find(c => titleOf(c) === option) || cards.find(c => titleOf(c).includes(option))
-    if (!card) return { ok: false, result: `未找到卡片「${option}」，可选：${cards.map(titleOf).join(' / ')}` }
+    const card = cards.find(c => titleOf(c) === want) || cards.find(c => titleOf(c).includes(want))
+    if (!card) return { ok: false, result: `未找到卡片「${want}」，可选：${cards.map(titleOf).join(' / ')}` }
     card.click()
     if (!await waitFor(() => activeOf(card), { timeout: 500, step: 50 })) {
       return { ok: false, result: `卡片「${titleOf(card)}」点击后未变选中态，请 get_form 复核` }
