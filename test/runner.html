@@ -314,6 +314,17 @@ window.chrome = {
   assert(/禁用|disabled/.test(rDis.result), 'E3b 明确提示「次へ」当前处于禁用状态，不要直接 finish', rDis.result)
   disBtnHolder.remove()
 
+  // E4: 回归锁定——nextish 只认导航词。type=submit/primary 且文案不含导航词的最终提交按钮
+  // （予約する/保存 等）不得被 findNavButton('next') 选中（曾有 submit/primary 兜底导致误点提交）
+  const trapHolder = document.createElement('div')
+  trapHolder.innerHTML = `
+    <form><input type="text"><button type="submit" class="ant-btn ant-btn-primary" id="btn-trap-submit">予約する</button></form>
+    <button type="button" class="ant-btn ant-btn-primary" id="btn-trap-save">保存</button>`
+  document.body.appendChild(trapHolder)
+  const navTrap = findNavButton('next')
+  eq(navTrap.btn, null, 'E4 予約する/保存 等词表外提交按钮不被当作 next')
+  trapHolder.remove()
+
   // ===== F. 全量优化回归（isSubmitLabel / actions 口径 / 富文本 / 多选 / lang）=====
   out.push('<div class="section">F. 提交判定与覆盖回归</div>')
   eq(isSubmitLabel('登録して次へ'), false, 'F1 「登録して次へ」导航优先→非提交')

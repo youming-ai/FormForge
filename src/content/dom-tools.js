@@ -613,13 +613,14 @@ function findNavButton (kind) {
 
   // next：推进本步（次へ / 次へ進む / 次のステップへ / 確認画面へ / 進む / 続ける / 下一步 等）
   // 覆盖 Ant Design 2 字符自动插空格（「次 へ」）及确认页前一步的「確認画面へ」
+  // nextish 只认导航词：type=submit/primary 兜底曾让词表外的最终提交按钮（予約する/申請する/保存…）被点下去；
+  // 漏点「次へ」可在 finish 里报人工（可恢复），误提交不可逆。再放宽时同步扩 isNextWord 词表。
   const isNextWord = t => /^(次へ|次へ進む|次のステップへ|次のステップ|進む|続ける|確認画面へ|確認画面|確認へ|確認する|入力内容を確認する|入力内容の確認|内容を確認する|同意して次へ|下一步|下一页|继续|next|continue|step|다음|siguiente|suivant|weiter)$/i.test(t) ||
     /次へ|次のステップ|確認画面へ|確認へ|進む|続ける|下一步|下一页|继续|continue/i.test(t)
 
   const nextish = b => {
     const t = norm(b)
-    if (!t) return false
-    return isNextWord(t) || b.type === 'submit' || /primary|main/i.test(b.className)
+    return !!t && isNextWord(t)
   }
 
   const score = b => {
