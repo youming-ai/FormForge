@@ -545,6 +545,12 @@ function dateCandidates (ph, y, m, d) {
 async function setDate (ref, y, m, d) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
+  // 参数校验：模型漏传/传错时明确报错，而不是拿「undefined年undefined月」这类候选逐个试错
+  y = Number(y); m = Number(m); d = Number(d)
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) ||
+      y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) {
+    return { ok: false, result: `set_date 参数无效（year=${y}, month=${m}, day=${d}）：请传整数 year/month/day，月 1~12、日 1~31` }
+  }
   ensureVisible(r.item)
   // 原生 date/month input：直接设值（month 粒度只设年月，日被控件忽略）
   const native = r.item.querySelector('input[type="date"], input[type="month"]') ||

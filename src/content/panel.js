@@ -168,7 +168,8 @@ function createPanel () {
     event.currentTarget.setAttribute('aria-label', collapsed ? 'パネルを展開' : 'パネルを折りたたむ')
     event.currentTarget.title = collapsed ? 'パネルを展開' : 'パネルを折りたたむ'
   })
-  $('clearlog').addEventListener('click', e => { e.stopPropagation(); ui.log.innerHTML = '' })
+  // preventDefault：button 在 summary 内，点击默认会折叠 details，仅 stopPropagation 拦不住
+  $('clearlog').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); ui.log.innerHTML = '' })
   ui.start.addEventListener('click', onMainButton)
   ui.uploadimg.addEventListener('change', onPickImage)
   ui.rmimg.addEventListener('click', onRemoveImage)
@@ -189,7 +190,11 @@ function createPanel () {
     ui.model.value = s.model || 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M'
     // 基础邮箱：设置 > 页面探测；都没有就留空提示
     if (s.baseEmail) ui.baseemail.value = s.baseEmail
-    else { const d = detectUserEmail(); if (d) { ui.baseemail.value = d; ui.baseemail.placeholder = `検出済み：${d}` } }
+    else {
+      // 探测值只进 placeholder 不进 value：避免随任意一次设置保存被静默固化进 storage（运行时每次重新探测）
+      const d = detectUserEmail()
+      if (d) ui.baseemail.placeholder = `自動検出：${d}（空欄なら使用）`
+    }
     if (s.uploadImage?.name) {
       ui.uploadimgname.textContent = `設定中の画像：${s.uploadImage.name}`
       ui.uploadimgname.hidden = false
@@ -291,6 +296,7 @@ function panelLog (kind, text, extra) {
 }
 
 function togglePanel () {
-  if (!ui) { createPanel(); return }
+  // SPA 软导航可能把 host 从文档摘除：ui 还指向游离节点时重建，避免「点图标没反应」
+  if (!ui?.host.isConnected) { ui = null; createPanel(); return }
   ui.host.style.display = (ui.host.style.display === 'none') ? '' : 'none'
 }

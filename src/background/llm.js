@@ -49,9 +49,11 @@ export async function resolveModel (settings) {
         const m = (x.id || '').match(/(\d+(?:\.\d+)?)[Bb]-(?:A\d+[Bb])?/) || (x.id || '').match(/(\d+(?:\.\d+)?)[Bb](?![A-Za-z])/)
         return m ? parseFloat(m[1]) : 0
       }
+      // 已加载判定：llama.cpp/llama-swap 用 status.value，LM Studio 用 state（loaded / loaded-memory）
+      const isLoaded = x => x.status?.value === 'loaded' || /^(loaded|loaded-memory)$/i.test(String(x.state || ''))
       const score = x => {
         let s = 0
-        if (x.status?.value === 'loaded') s += 100000          // 已加载优先（避免冷加载等待）
+        if (isLoaded(x)) s += 100000                             // 已加载优先（避免冷加载等待）
         if (/A\d+B/i.test(x.id || '')) s += 300                // MoE：激活参数少，多轮循环快
         if (/Qwen/i.test(x.id || '')) s += 500                 // Qwen 工具调用最稳（本 agent 首选系）
         s += Math.min(params(x), 40) * 100                     // 参数量越大通常能力越强（封顶 40B）

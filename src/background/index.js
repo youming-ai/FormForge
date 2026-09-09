@@ -45,7 +45,8 @@ function compressHistory (messages) {
   const tail = messages.slice(start)
   return [
     head,
-    { role: 'system', content: '（较早的对话已压缩省略。以最近一次 get_form 返回的当前表单状态为准，不要依赖被省略的历史。）' },
+    // 用 user 而非 system：部分严格的 OpenAI 兼容服务拒绝中段出现的 system 消息
+    { role: 'user', content: '（较早的对话已压缩省略。以最近一次 get_form 返回的当前表单状态为准，不要依赖被省略的历史。）' },
     ...tail,
   ]
 }
@@ -113,15 +114,16 @@ async function runAgent (tabId, scenario, baseEmail) {
       for (const tc of toolCalls) log(tabId, 'tool', `${tc.function?.name} ${briefInput(parseArgs(tc))}`)
 
       // MPA「次へ→POST→整页重载」有一段旧文档已卸载、新内容脚本未注入的空窗，sendMessage 报
-      // "Receiving end does not exist"。此时工具必然尚未执行，重试无副作用：退避重试 ~3s 撑过空窗，
-      // 别让一次整页跳转就终止整个任务。其它错误（tab 已关闭/端口中断，可能已产生副作用）不重试，立即判失联。
+      // "Receiving end does not exist"。此时工具必然尚未执行，重试无副作用：退避重试 ~6s 撑过空窗
+      // （慢 POST 的整页跳转也可能超过 3s），别让一次整页跳转就终止整个任务。其它错误（tab 已关闭/端口中断，
+      // 可能已产生副作用）不重试，立即判失联。
       const execTc = async tc => {
         for (let i = 0; ; i++) {
           try {
             return await chrome.tabs.sendMessage(tabId, { type: 'agent:exec', name: tc.function?.name, input: parseArgs(tc) })
           } catch (err) {
             const msg = String(err?.message || err)
-            if (!/receiving end does not exist/i.test(msg) || i >= 8) {
+            if (!/receiving end does not exist/i.test(msg) || i >= 15) {
               return { ok: false, lost: true, result: `与页面通信失败：${msg}` }
             }
             await sleep(400)
