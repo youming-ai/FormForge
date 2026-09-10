@@ -168,7 +168,8 @@ function createPanel () {
     event.currentTarget.setAttribute('aria-label', collapsed ? 'パネルを展開' : 'パネルを折りたたむ')
     event.currentTarget.title = collapsed ? 'パネルを展開' : 'パネルを折りたたむ'
   })
-  $('clearlog').addEventListener('click', e => { e.stopPropagation(); ui.log.innerHTML = '' })
+  // preventDefault：button 在 summary 内，点击默认会折叠 details，仅 stopPropagation 拦不住
+  $('clearlog').addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); ui.log.innerHTML = '' })
   ui.start.addEventListener('click', onMainButton)
   ui.uploadimg.addEventListener('change', onPickImage)
   ui.rmimg.addEventListener('click', onRemoveImage)
@@ -189,7 +190,11 @@ function createPanel () {
     ui.model.value = s.model || 'Qwen/Qwen3-30B-A3B-GGUF:Qwen3-30B-A3B-Q4_K_M'
     // 基础邮箱：设置 > 页面探测；都没有就留空提示
     if (s.baseEmail) ui.baseemail.value = s.baseEmail
-    else { const d = detectUserEmail(); if (d) { ui.baseemail.value = d; ui.baseemail.placeholder = `検出済み：${d}` } }
+    else {
+      // 探测值只进 placeholder 不进 value：避免随任意一次设置保存被静默固化进 storage（运行时每次重新探测）
+      const d = detectUserEmail()
+      if (d) ui.baseemail.placeholder = `自動検出：${d}（空欄なら使用）`
+    }
     if (s.uploadImage?.name) {
       ui.uploadimgname.textContent = `設定中の画像：${s.uploadImage.name}`
       ui.uploadimgname.hidden = false
@@ -204,21 +209,25 @@ async function mergeSettings (patch) {
   await chrome.storage.local.set({ agentSettings: { ...(agentSettings || {}), ...patch } })
 }
 
-function saveCfg (silent) {
+async function saveCfg (silent) {
   // 三项直写（含空字符串）：getSettings 会把空串过滤回退默认，清空输入 = 恢复默认
   const patch = {
     endpoint: ui.endpoint.value.trim(),
     model: ui.model.value.trim(),
     baseEmail: ui.baseemail.value.trim(),
   }
-  mergeSettings(patch).then(() => {
-    if (silent) {
-      if (ui.savedtip) {
-        ui.savedtip.textContent = '保存済み'
-        setTimeout(() => { ui.savedtip.textContent = '' }, 1500)
-      }
-    } else setStatus('設定を保存しました')
-  })
+  try {
+    await mergeSettings(patch)
+  } catch (_) {
+    setStatus('設定の保存に失敗（ストレージ容量超過の可能性）')
+    return
+  }
+  if (silent) {
+    if (ui.savedtip) {
+      ui.savedtip.textContent = '保存済み'
+      setTimeout(() => { ui.savedtip.textContent = '' }, 1500)
+    }
+  } else setStatus('設定を保存しました')
 }
 
 function onPickImage () {
@@ -229,6 +238,7 @@ function onPickImage () {
   reader.onload = () => {
     mergeSettings({ uploadImage: { dataUrl: reader.result, name: file.name, type: file.type } })
       .then(() => { ui.uploadimgname.textContent = `設定中の画像：${file.name}`; ui.uploadimgname.hidden = false; ui.rmimg.hidden = false; setStatus('固定テスト画像を保存しました') })
+      .catch(() => setStatus('画像の保存に失敗（4MB でもストレージ容量を超過する可能性）'))
   }
   reader.readAsDataURL(file)
 }
@@ -236,6 +246,7 @@ function onPickImage () {
 function onRemoveImage () {
   mergeSettings({ uploadImage: null })
     .then(() => { ui.uploadimgname.textContent = ''; ui.uploadimgname.hidden = true; ui.rmimg.hidden = true; setStatus('ダミー画像の自動生成に戻しました') })
+    .catch(() => setStatus('画像の解除に失敗しました'))
 }
 
 function onMainButton () {
@@ -246,8 +257,9 @@ function onMainButton () {
   onStart()
 }
 
-function onStart () {
-  saveCfg(true)
+async function onStart () {
+  // 先落盘再启动：避免 sendMessage 先于 storage.set 落地，runAgent 的 getSettings 读到旧 endpoint
+  await saveCfg(true)
   ui.log.innerHTML = ''
   setRunning(true)
   const baseEmail = ui.baseemail.value.trim() || detectUserEmail()
@@ -267,7 +279,8 @@ function setStatus (t) {
   if (!ui) return
   const short = ui.card.classList.contains('running')
     ? '実行中'
-    : (/失敗|エラー|禁止|未授权|タイムアウト|超时|连不上|接続|上限|已达最大|无法|できない|要確認|推理服务/.test(t) ? '要確認' : (/保存/.test(t) ? '保存完了' : (/終了|完了|结束/.test(t) ? '完了' : '待機中')))
+    // 背景日志是中文：中日两套关键词都认（失敗/失败、タイムアウト/超时…）
+    : (/失敗|失败|エラー|禁止|未授权|タイムアウト|超时|连不上|接続|上限|已达最大|无法|できない|要確認|推理服务|不可达/.test(t) ? '要確認' : (/保存/.test(t) ? '保存完了' : (/終了|完了|结束/.test(t) ? '完了' : '待機中')))
   ui.headstatus.textContent = short
 }
 
@@ -284,6 +297,7 @@ function panelLog (kind, text, extra) {
 }
 
 function togglePanel () {
-  if (!ui) { createPanel(); return }
+  // SPA 软导航可能把 host 从文档摘除：ui 还指向游离节点时重建，避免「点图标没反应」
+  if (!ui?.host.isConnected) { ui = null; createPanel(); return }
   ui.host.style.display = (ui.host.style.display === 'none') ? '' : 'none'
 }

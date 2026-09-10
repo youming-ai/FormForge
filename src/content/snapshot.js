@@ -4,10 +4,14 @@
 // 每次 buildSnapshot 重建 REFS（ref → {item, kind}），供 dom-tools 按 ref 操作。
 
 let REFS = [] // [{ref, item, kind}]
+// ref 编号全局自增（不随快照重置）：否则同一批里 get_form 重建 REFS 后，上一轮的 e7 会指向本轮的另一个字段
+let refSeq = 0
 
 // 最终提交类按钮文案（安全红线：绝不点击）。多语言覆盖（日/中/英/韩/西/法/德）。
 // 刻意不含「申請/次へ/確認/下一步/继续」等常见中间步骤词——宁可误拦（停下留人工）也不放过提交。
-const SUBMIT_WORDS = /申込|申込み|送信|登録|提出|決済|購入|注文|完了|submit|place order|order now|checkout|purchase|buy now|complete|register|sign up|create account|pay now|confirm order|提交|确认提交|立即购买|下单|支付|注册|完成|同意并提交|제출|등록|결제|구매|주문|완료|enviar|soumettre|absenden|bestellen|kaufen|bezahlen|confirmar|comprar|pagar/i
+const SUBMIT_WORDS = /申し?込|送信|提出|登録|決済|購入|注文|完了|確定|応募|支払う|お支払い|submit|placeorder|ordernow|checkout|purchase|buynow|complete|register|signup|createaccount|paynow|confirmorder|提交|确认提交|立即购买|下单|支付|注册|完成|同意并提交|제출|등록|결제|구매|주문|완료|enviar|soumettre|absenden|bestellen|kaufen|bezahlen|confirmar|comprar|pagar/i
+// 短且歧义的词只在按钮文案「完全等于」它时算提交（避免「支払方法を変更」「Apply coupon」被误拦）
+const SUBMIT_EXACT = /^(apply|send|pay|order|finish|done|save|送る)$/i
 
 // 中间步骤导航词：含这些词的按钮归 click_button 管，即使同时命中提交词表也不视为最终提交
 // （如「登録して次へ」是下一步不是最终提交；「確認画面へ」是去确认页）。导航优先，避免误拦中间步骤。
@@ -15,7 +19,7 @@ const NEXT_WORDS = /次へ|次のステップ|確認画面へ|確認へ|進む|�
 // 空白归一（覆盖 Ant 2 字符自动插空格「次 へ」与全角空格）
 const normLabel = t => String(t || '').replace(/[\s\u00a0\u3000]+/g, '')
 // 最终提交判定唯一入口：命中提交词表 且 不含导航词
-const isSubmitLabel = t => { const n = normLabel(t); return SUBMIT_WORDS.test(n) && !NEXT_WORDS.test(n) }
+const isSubmitLabel = t => { const n = normLabel(t); return (SUBMIT_WORDS.test(n) || SUBMIT_EXACT.test(n)) && !NEXT_WORDS.test(n) }
 
 // —— 作用域：可见表单中控件最多的 → body ——
 function pickScope () {
@@ -24,7 +28,10 @@ function pickScope () {
     const n = f.querySelectorAll('input:not([type="hidden"]), select, textarea').length
     if (n > 0 && (!best || n > best.n)) best = { f, n }
   }
-  return best ? best.f : document.body
+  // 只有当这个 form 装着页面上过半的控件时才认它：主表单不用 <form>（React/Vue 常见）而页头有个
+  // 搜索/登录 form 时，否则整个扫描会跑偏到搜索框上
+  const all = document.querySelectorAll('input:not([type="hidden"]), select, textarea').length
+  return best && best.n * 2 >= all ? best.f : document.body
 }
 const scopeEl = () => pickScope()
 
@@ -32,14 +39,14 @@ const scopeEl = () => pickScope()
 // 通用启发式：范围内没有可编辑控件（含 contenteditable 富文本）+ 页面出现「最终提交」类按钮。
 const isConfirm = () => {
   const scope = scopeEl()
-  const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""]')]
+  const editable = [...scope.querySelectorAll('input, textarea, select, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')]
     .filter(el => visible(el) && !el.disabled && !['hidden', 'button', 'submit', 'reset', 'image', 'file'].includes(el.type || ''))
   if (editable.length) return false
   // 开关是 button 元素（无 input 子元素）：纯开关步骤 + 提交词按钮不能误判为确认页
   const hasSwitch = [...scope.querySelectorAll('button[role="switch"], button.ant-switch')]
     .some(el => visible(el) && !el.disabled && el.getAttribute('aria-disabled') !== 'true')
   if (hasSwitch) return false
-  return [...document.querySelectorAll('button, input[type="submit"]')]
+  return [...document.querySelectorAll('button, input[type="submit"], [role="button"], a.ant-btn')]
     .some(b => visible(b) && !b.disabled && isSubmitLabel(b.textContent || b.value))
 }
 
@@ -73,7 +80,7 @@ function classify (item) {
   if (item.querySelector('.ant-switch')) return 'switch'
   if (item.querySelector('input:not([type="file"])')) return 'text'
   // contenteditable 富文本（div[contenteditable] 等，现代表单常见）
-  if (item.matches?.('[contenteditable="true"], [contenteditable=""]') || item.querySelector('[contenteditable="true"], [contenteditable=""]')) return 'richtext'
+  if (item.matches?.('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]') || item.querySelector('[contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]')) return 'richtext'
   return 'unknown'
 }
 
@@ -98,16 +105,29 @@ const labelOf = item => {
 }
 
 const errorOf = item => {
-  const sel = '.ant-form-item-explain-error, .invalid-feedback, .error-message, .field-error, [class*="form-error"], [aria-invalid="true"]'
-  const scope = item.matches?.('input, select, textarea') ? (item.parentElement || item.closest('div, p, li')) : item
-  const el = scope?.querySelector(sel)
-  return (el?.textContent || '').trim()
+  const sel = '.ant-form-item-explain-error, .invalid-feedback, .error-message, .field-error, [class*="form-error"]'
+  // 子单元：Ant 把 explain-error 渲染在 .ant-form-item 下、输入组之外，只看自身/父元素会漏掉
+  const scope = item.closest?.('.ant-form-item') ||
+    (item.matches?.('input, select, textarea') ? (item.parentElement || item.closest('div, p, li')) : item)
+  const textErr = [...(scope?.querySelectorAll(sel) || [])]
+    .filter(visible)
+    .map(el => (el.textContent || '').trim())
+    .find(Boolean)
+  if (textErr) return textErr
+  // aria-invalid 不进通用选择器：挂在容器 div 上会把 label+错误整段文本当错误返回；
+  // 只认控件自身被标记的情况——页面没有错误文案节点时给 agent 一个明确信号
+  const control = [...(scope?.querySelectorAll('input, select, textarea') || [])]
+    .find(el => el.getAttribute('aria-invalid') === 'true' && visible(el))
+  return control ? '（控件被标记 aria-invalid：校验失败但无可见错误文案，请按字段语义换值重试）' : ''
 }
 
 // 必填：Ant 标记 / 原生 required / aria-required
 const isRequired = item =>
   !!(item.querySelector('.ant-form-item-required, [required], [aria-required="true"]') ||
-     item.matches?.('[required], [aria-required="true"]'))
+     item.matches?.('[required], [aria-required="true"]') ||
+     // 子单元（输入组分段、input-group 容器等）：必填标记挂在外层 .ant-form-item 的 label 上，
+     // 不往上找就会漏判成非必填 → 进不了 missingRequired，agent 按「跳过已完成」规则整段略过
+     item.closest?.('.ant-form-item')?.querySelector('.ant-form-item-label .ant-form-item-required'))
 
 // 取控件 placeholder 当标签兜底（无 label 只有 placeholder 的字段，如地址组子字段）
 const placeholderOf = item => {
@@ -118,13 +138,19 @@ const placeholderOf = item => {
 }
 
 // —— 取值（Ant + 原生两路）——
-const radioTextOf = i => (i.closest('label')?.textContent || i.value || '').trim()
+// 选项文本：label 包裹 → 兄弟 label[for] → value。三种写法都常见，快照与 choose_option 必须同一口径，
+// 否则会出现「快照列出了选项、按文本却选不中」
+const optionTextOf = i => (
+  i.closest('label')?.textContent ||
+  (i.id && document.querySelector(`label[for="${CSS.escape(i.id)}"]`)?.textContent) ||
+  i.value || ''
+).trim()
 
 function valueOf (item, kind) {
   if (kind === 'text' || kind === 'textarea' || kind === 'number') {
     if (item.matches?.('input, textarea')) return item.value || ''
-    // 数字框优先读 .ant-input-number-input，避免抓到 stepper 等无关 input
-    return (item.querySelector('.ant-input-number-input, textarea, input')?.value || '')
+    // 数字框优先读 .ant-input-number-input，避免抓到 stepper 等无关 input；hidden 排除（否则排在前面时读到 csrf 等假值）
+    return (item.querySelector('.ant-input-number-input, textarea, input:not([type="hidden"])')?.value || '')
   }
   if (kind === 'select') {
     // Ant select：单/多选都取所有已选 .ant-select-selection-item（多选有多个）
@@ -139,13 +165,13 @@ function valueOf (item, kind) {
     const ant = item.querySelector('.ant-radio-wrapper-checked')
     if (ant) return ant.textContent.trim()
     const c = item.querySelector('input[type="radio"]:checked')
-    return c ? radioTextOf(c) : ''
+    return c ? optionTextOf(c) : ''
   }
   if (kind === 'checkbox') {
     const ant = [...item.querySelectorAll('.ant-checkbox-wrapper')]
     if (ant.length) return ant.filter(w => w.querySelector('.ant-checkbox-checked')).map(w => w.textContent.trim()).join(' | ')
     return [...item.querySelectorAll('input[type="checkbox"]')]
-      .filter(i => i.checked).map(i => (i.closest('label')?.textContent || i.value || '').trim()).join(' | ')
+      .filter(i => i.checked).map(optionTextOf).join(' | ')
   }
   if (kind === 'date') {
     const ant = item.querySelector('.ant-picker-input input')
@@ -171,23 +197,31 @@ function valueOf (item, kind) {
 }
 
 // —— 选项列表（radio/checkbox 两路；native select 的 options 也免费可读）——
+// 滤 disabled：与 choose_option 的可用性口径一致，否则「快照列了选项、按文本却选不中」
 const radioOptionsOf = item => {
-  const ant = [...item.querySelectorAll('.ant-radio-wrapper')]
+  const ant = [...item.querySelectorAll('.ant-radio-wrapper')].filter(w => !w.classList.contains('ant-radio-wrapper-disabled'))
   if (ant.length) return ant.map(w => w.textContent.trim())
-  return [...item.querySelectorAll('input[type="radio"]')].map(radioTextOf).filter(Boolean)
+  return [...item.querySelectorAll('input[type="radio"]')].filter(i => !i.disabled).map(optionTextOf).filter(Boolean)
 }
 const checkboxOptionsOf = item => {
-  const ant = [...item.querySelectorAll('.ant-checkbox-wrapper')]
+  const ant = [...item.querySelectorAll('.ant-checkbox-wrapper')].filter(w => !w.classList.contains('ant-checkbox-wrapper-disabled'))
   if (ant.length) return ant.map(w => ({ label: w.textContent.trim(), checked: !!w.querySelector('.ant-checkbox-checked') }))
-  return [...item.querySelectorAll('input[type="checkbox"]')]
-    .map(i => ({ label: (i.closest('label')?.textContent || i.value || '').trim(), checked: i.checked }))
+  return [...item.querySelectorAll('input[type="checkbox"]')].filter(i => !i.disabled)
+    .map(i => ({ label: optionTextOf(i), checked: i.checked }))
     .filter(o => o.label)
+}
+
+// 单元容器：父级若是 form 级大容器则以控件自身为单元，避免把整个 form 当成一个字段
+// （否则 click(ref) 的 querySelector('button') 会摸到表单里的提交按钮）
+const unitBox = el => {
+  const p = el.closest('label') || el.parentElement
+  return p && p.matches('form, body, main, [role="main"], table') ? el : p
 }
 
 // 原生控件 → 字段单元：radio/checkbox 尝试按 name 在组容器（fieldset/[role]/ul/table）内聚合；
 // 其余取最近 label 或父元素为单元。已被 Ant 路径覆盖的控件跳过。
 function nativeFieldUnits (scope, covered) {
-  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""], button[role="switch"], button.ant-switch')]
+  const els = [...scope.querySelectorAll('input, select, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"], button[role="switch"], button.ant-switch')]
     .filter(el => visible(el) && !el.disabled)
     // type 黑名单只对 input 生效：button 的 type 默认 submit，不能沿用 input 语义过滤
     .filter(el => el.tagName !== 'INPUT' || !['hidden', 'button', 'submit', 'reset', 'image'].includes(el.type || ''))
@@ -206,18 +240,15 @@ function nativeFieldUnits (scope, covered) {
       }
       if (grp && [...grp.querySelectorAll(`input[type="${el.type}"]`)].filter(i => !i.disabled).length > 1) {
         box = grp
-      } else box = el.closest('label') || el.parentElement
-    } else if (el.tagName === 'BUTTON') {
-      // 开关 button：父级若是 form 级大容器则以自身为单元，避免把整个 form 当成一个字段
-      const parent = el.closest('label') || el.parentElement
-      box = (parent && parent.matches('form, body, main, [role="main"], table')) ? el : parent
+      } else box = unitBox(el)
     } else {
-      box = el.closest('label') || el.parentElement
+      box = unitBox(el)
     }
     if (!box) continue
     if (seen.has(box)) {
-      // 常见结构：多个 label+input 平铺在 form/同一父容器里，共享 box 会被去重丢字段 → 降级为控件自身作单元
-      if (box === el.parentElement || box === el.closest('label')) box = el
+      // 常见结构：多个 label+input 平铺在 form/同一父容器里，共享 box 会被去重丢字段 → 降级为控件自身作单元。
+      // radio/checkbox 例外：同组控件共享组容器是正常的，降级会造出查不到任何选项的幻影字段。
+      if ((box === el.parentElement || box === el.closest('label')) && el.type !== 'radio' && el.type !== 'checkbox') box = el
       else continue
     }
     if (seen.has(box)) continue
@@ -247,11 +278,13 @@ function findCardGroups (scope) {
 // 目标表单以日文为主：检测不到时默认按日文处理（多语言能力保留，prompt 按 lang 自适应）
 const DEFAULT_LANG = 'ja'
 function detectLang (doc = document) {
-  const htmlLang = (doc.documentElement?.getAttribute('lang') || '').trim()
-  if (htmlLang) return htmlLang
   const t = (doc.body?.textContent || '').slice(0, 2000)
+  // 假名/谚文是日/韩独有文字：html[lang] 标错时（日文表单标 en 很常见）以页面文本为准
   if (/[\u3040-\u30ff]/.test(t)) return 'ja'
   if (/[\uac00-\ud7af]/.test(t)) return 'ko'
+  const htmlLang = (doc.documentElement?.getAttribute('lang') || '').trim()
+  if (htmlLang) return htmlLang
+  // 汉字 zh/ja 共用有歧义：只在没有 html[lang] 线索时才按文本判 zh
   if (/[\u4e00-\u9fff]/.test(t)) return 'zh'
   return ''
 }
@@ -266,9 +299,13 @@ function buildSnapshot () {
   const items = [...scope.querySelectorAll('.ant-form-item')].filter(visible)
   for (const item of items) {
     if (item.querySelector('.ant-form-item')) continue // 跳过含嵌套子项的父容器
+    // 平铺多个输入框的项（a-input-group：电话分段/姓名分栏/地址组）：整项只能寻址到第一个，
+    // 填完就 filled=true 而校验因其余为空报错 → 不认领，交给原生扫描按控件逐个建 ref
+    const plainInputs = [...item.querySelectorAll('input:not([type="hidden"]), textarea')].filter(visible)
+    if (plainInputs.length > 1 && !item.querySelector('.ant-select, .ant-picker, .ant-radio-group, .ant-checkbox-wrapper, .ant-upload, .ant-input-number')) continue
     covered.push(item)
     let kind = classify(item)
-    const ref = 'e' + REFS.length
+    const ref = 'e' + (refSeq++)
     REFS.push({ ref, item, kind })
     const f = { ref, kind, label: labelOf(item) || placeholderOf(item), value: valueOf(item, kind), required: isRequired(item) }
     f.filled = !!String(f.value || '').trim()
@@ -286,7 +323,7 @@ function buildSnapshot () {
   for (const { root, cards, titleOf, activeOf } of findCardGroups(scope)) {
     if (!visible(root)) continue
     covered.push(root)
-    const ref = 'e' + REFS.length
+    const ref = 'e' + (refSeq++)
     REFS.push({ ref, item: root, kind: 'cards', cards, titleOf, activeOf })
     const active = cards.find(activeOf)
     fields.push({
@@ -303,7 +340,7 @@ function buildSnapshot () {
     if (!visible(box)) continue
     const kind = classify(box)
     if (kind === 'unknown') continue
-    const ref = 'e' + REFS.length
+    const ref = 'e' + (refSeq++)
     REFS.push({ ref, item: box, kind })
     const f = { ref, kind, label: labelOf(box) || placeholderOf(box), value: valueOf(box, kind), required: isRequired(box) }
     f.filled = !!String(f.value || '').trim()
@@ -329,18 +366,26 @@ function buildSnapshot () {
     ...document.querySelectorAll('button, input[type="submit"], [role="button"], a.ant-btn, .ant-steps-action button')
   ])).filter(visible)
 
-  allNavElements.slice(0, 15).forEach(b => {
+  const btnEntries = []
+  allNavElements.forEach(b => {
     const t = (b.textContent || b.value || '').trim()
     if (!t) return
     const forbidden = isSubmitLabel(t)
     const disabled = b.disabled || b.getAttribute('aria-disabled') === 'true' || b.classList.contains('ant-btn-disabled') || b.classList.contains('is-disabled')
-    buttons.push({
+    btnEntries.push({
       label: t,
       kind: forbidden ? 'submit' : ((b.type === 'submit' || /primary|main/i.test(b.className)) ? 'primary' : 'default'),
       disabled: !!disabled,
       forbidden, // 最终提交类：点击会被硬拦截
     })
   })
+  // 头部导航按钮多时前 15 个可能全是页头菜单：提交词/主按钮优先入列，其余按文档序补足
+  const rank = e => (e.forbidden ? 2 : 0) + (e.kind === 'primary' ? 1 : 0)
+  buttons.push(...btnEntries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => rank(b.e) - rank(a.e) || a.i - b.i)
+    .slice(0, 15)
+    .map(x => x.e))
 
   // 5) 步骤内其它可点按钮（如「住所自動入力」/「自动带入地址」），给 ref 供 click 使用
   // 口径与 buttons 一致：原生 button + [role=button] + a 按钮；上限 20 个控制快照 token
@@ -350,9 +395,10 @@ function buildSnapshot () {
     const label = (b.textContent || '').trim()
     if (!label) return
     if (isSubmitLabel(label)) return // 最终提交类不进 actions，避免 click 误点
+    if (b.closest('.ant-upload')) return // 上传触发器归 upload_file；click 会弹原生文件框阻塞页面
     // 导航类按钮（次へ/戻る/確認画面へ…）归属 click_button，不进 actions
     if (NEXT_WORDS.test(normLabel(label))) return
-    const ref = 'e' + REFS.length
+    const ref = 'e' + (refSeq++)
     REFS.push({ ref, item: b, kind: 'button' })
     actions.push({ ref, label })
   })
@@ -398,7 +444,7 @@ function buildSnapshot () {
 const getRef = ref => {
   const r = REFS.find(r => r.ref === ref)
   if (!r) return null
-  // 按钮类元素（如住所自動入力）可能被框架暂时移出 DOM 又放回；其它字段一旦 detach 即失效
-  if (r.kind !== 'button' && r.item.isConnected === false) return null
+  // 节点已 detach（框架重渲染）→ 失效。按钮也不例外：点游离节点是空操作却会返回「已点击」
+  if (r.item.isConnected === false) return null
   return r
 }
