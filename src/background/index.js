@@ -1,6 +1,6 @@
 // index.js —— background 入口（service worker, module）
 // 跑 OpenAI 兼容(LM Studio/llama.cpp)的工具调用循环，驱动 content 执行 DOM 操作
-// 同一批 tool_calls 分阶段执行：get_form 先行 → read_options 并行 → 写入类并行 → click/click_button 串行收尾
+// 同一批 tool_calls 分阶段执行：read_options 并行 → 写入类并行 → click/click_button 串行 → get_form 收尾
 import { TOOLS } from './tools.js'
 import { buildSystemPrompt } from './system-prompt.js'
 import { getSettings, resolveModel, callLLM, parseArgs, toResultString, briefInput } from './llm.js'
