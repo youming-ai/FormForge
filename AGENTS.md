@@ -1,4 +1,4 @@
-# CLAUDE.md — FormForge（通用表单自动填充 AI Agent · 浏览器内 · 本地推理）
+# AGENTS.md — FormForge（通用表单自动填充 AI Agent · 浏览器内 · 本地推理）
 
 纯浏览器内的 Chrome MV3 **通用**表单填充扩展：点扩展图标在**任意页面**唤出浮窗（不自动注入），由**本地推理服务**（OpenAI 兼容 + function calling）通过 **DOM 工具**逐步填写任意网页表单，读真实下拉选项、按校验纠错、走到确认页/提交前停下（**绝不提交**——最终提交类按钮文案有硬拦截词表 `SUBMIT_WORDS`）。扫描分层：Ant Design 优先适配 + 原生 HTML 表单兜底（label/fieldset/原生 input/select/textarea/radio/checkbox/date/file 全支持）。
 
