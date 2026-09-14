@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: readonly 回显的确认页</title></head>
+<body>
+<h1>内容確認</h1>
+<!-- readonly input 回显已填内容（值可被程序改写，但不是可交互字段）+ 最终提交按钮
+     → 仍应判定为确认页；旧实现不排除 readonly，会把它当可编辑控件而漏判。 -->
+<label for="ro-name">氏名</label>
+<input id="ro-name" readonly value="テスト山田太郎">
+<label for="ro-addr">住所</label>
+<input id="ro-addr" readonly value="東京都渋谷区">
+<button type="submit" id="btn-submit">登録する</button>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>

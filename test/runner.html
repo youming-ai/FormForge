@@ -362,9 +362,14 @@ window.chrome = {
   bareSubmit.type = 'submit'
   bareSubmit.textContent = '送信'
   form.append(bare, bareSubmit)
+  let bareSubmitted = false
+  const onBareSubmit = e => { bareSubmitted = true; e.preventDefault() }
+  form.addEventListener('submit', onBareSubmit)
   const bareF = buildSnapshot().fields.find(f => f.label === '裸フィールド')
   const rBare = bareF ? await execTool('click', { ref: bareF.ref }) : { ok: false }
-  assert(!!bareF && rBare.ok === true, 'F7j form 直接子控件的单元是控件自身（未把整个 form 当字段）')
+  assert(!!bareF && !bareSubmitted, 'F7j form 直接子控件的单元是控件自身（未把整个 form 当字段、未触发表单提交）')
+  assert(!rBare.ok && /不是可点击元素/.test(rBare.result || ''), 'F7j2 对非可点单元 click 明确失败（不再静默假成功）', JSON.stringify(rBare))
+  form.removeEventListener('submit', onBareSubmit)
   bare.remove(); bareSubmit.remove()
 
   // F8: lang 检测（runner.html 自带 lang=ja）
@@ -634,6 +639,173 @@ window.chrome = {
   const i5r = await execTool('fill_text', { ref: i5F.ref, value: '書いた' })
   eq(document.getElementById('i5t').value, '書いた', 'I5b fill 落到可见 input 而非 hidden')
   i5.remove()
+
+  // ===== J. 审查修复回归（词表锚定 / cards 守卫 / 快照漏填 / 回读校验）=====
+  out.push('<div class="section">J. 审查修复回归</div>')
+  const mainForm = document.getElementById('main-form')
+
+  // J1: 导航词不得再豁免提交词表 —— 英文「X and continue」必须仍算提交
+  eq(isSubmitLabel('Submit and continue'), true, 'J1a 「Submit and continue」→提交（continue 不再豁免）')
+  eq(isSubmitLabel('Create account and continue'), true, 'J1b 「Create account and continue」→提交')
+  eq(isSubmitLabel('Sign up and continue'), true, 'J1c 「Sign up and continue」→提交')
+  eq(isSubmitLabel('登録して次へ'), false, 'J1d 「登録して次へ」导航优先（规范认可的复合形态）')
+  eq(isSubmitLabel('同意して次へ'), false, 'J1e 「同意して次へ」导航优先')
+  eq(isSubmitLabel('登録内容を確認する'), false, 'J1f 「〜を確認する」review 步骤→导航')
+  eq(isSubmitLabel('確認画面へ'), false, 'J1g 「確認画面へ」非提交')
+  eq(isSubmitLabel('予約する'), true, 'J1h 「予約する」补入词表→拦截')
+  eq(isSubmitLabel('保存する'), true, 'J1i 「保存する」补入词表→拦截')
+  eq(isSubmitLabel('Apply Now'), true, 'J1j 「Apply Now」→拦截')
+  eq(isSubmitLabel('Finish Setup'), true, 'J1k 「Finish Setup」→拦截')
+  eq(isSubmitLabel('Send Message'), true, 'J1l 「Send Message」→拦截')
+  eq(isSubmitLabel('支払方法を変更'), false, 'J1m 歧义词不误拦')
+
+  // J2: 该按钮不得被 findNavButton 选为 next（P0：曾被 continue 豁免后真点下去）
+  const j2 = document.createElement('div')
+  j2.innerHTML = '<button type="button" id="j2-continue">Sign up and continue</button>'
+  document.body.appendChild(j2)
+  const j2nav = findNavButton('next')
+  assert(!j2nav.btn || j2nav.btn.id !== 'j2-continue', 'J2 「Sign up and continue」不被 click_button 当作下一步', j2nav.btn && j2nav.btn.id)
+  j2.remove()
+
+  // J3: cards 分支提交守卫（表单内未写 type=button 的 <button role=radio> 默认 submit）
+  const j3 = document.createElement('div')
+  j3.setAttribute('role', 'radiogroup')
+  j3.innerHTML = '<button type="submit" role="radio">スタンダード</button><button type="submit" role="radio">プレミアム</button>'
+  mainForm.appendChild(j3)
+  const j3f = buildSnapshot().fields.find(f => f.kind === 'cards')
+  const j3r = j3f ? await execTool('choose_option', { ref: j3f.ref, option: 'スタンダード' }) : { ok: false, result: 'no cards field' }
+  assert(!!j3f && j3r.ok === false && /硬拦截/.test(j3r.result || ''), 'J3 表单内 default-submit 卡片被硬拦截', JSON.stringify(j3r))
+  j3.remove()
+
+  // J3b: 普通 div 卡片仍可正常选择（守卫不误伤）
+  const j4 = document.createElement('div')
+  j4.setAttribute('role', 'radiogroup')
+  j4.innerHTML = '<div role="radio" aria-checked="false">ベーシック</div><div role="radio" aria-checked="false">プロ</div>'
+  j4.querySelectorAll('[role="radio"]').forEach(c => c.addEventListener('click', () => c.setAttribute('aria-checked', 'true')))
+  mainForm.appendChild(j4)
+  const j4f = buildSnapshot().fields.find(f => f.kind === 'cards' && (f.options || []).includes('ベーシック'))
+  const j4r = j4f ? await execTool('choose_option', { ref: j4f.ref, option: 'ベーシック' }) : { ok: false, result: 'no cards field' }
+  assert(!!j4f && j4r.ok === true, 'J3b 普通 div 卡片正常选择', JSON.stringify(j4r))
+  j4.remove()
+
+  // J4: 地址组（.ant-select + 平铺 input）必须拆成多个单元，空的必填子字段要进 missingRequired
+  const j5 = document.createElement('div')
+  j5.className = 'ant-form-item'
+  j5.innerHTML = '<div class="ant-form-item-label"><label class="ant-form-item-required">住所</label></div>'
+    + '<input placeholder="郵便番号"><div class="ant-select"><div class="ant-select-selector"><span class="ant-select-selection-item">東京都</span></div></div><input placeholder="市区町村">'
+  mainForm.appendChild(j5)
+  const j5snap = buildSnapshot()
+  const j5zip = j5snap.fields.find(f => f.label === '郵便番号')
+  const j5city = j5snap.fields.find(f => f.label === '市区町村')
+  assert(!!j5zip && !!j5city, 'J4a 地址组两个平铺输入框各自建 ref（不再只认领第一个）', JSON.stringify(j5snap.fields.filter(f => /郵便|市区/.test(f.label || '')).map(f => f.label)))
+  assert(j5snap.missingRequired.some(x => x.includes('郵便番号')) && j5snap.missingRequired.some(x => x.includes('市区町村')), 'J4b 空的必填子字段进入 missingRequired', JSON.stringify(j5snap.missingRequired))
+  j5.remove()
+
+  // J5: 合并 checkbox 组 —— 必填成员未勾选不得被同组其它已勾选成员掩盖
+  const j6 = document.createElement('div')
+  j6.className = 'ant-form-item'
+  j6.innerHTML = '<div class="ant-form-item-label"><label>同意</label></div><label><input type="checkbox" required> 同意する</label><label><input type="checkbox" checked> メルマガ</label>'
+  mainForm.appendChild(j6)
+  const j6snap = buildSnapshot()
+  const j6f = j6snap.fields.find(f => f.kind === 'checkbox' && f.label === '同意')
+  assert(!!j6f && j6f.filled === false, 'J5 必填成员未勾选 → filled=false', JSON.stringify(j6f))
+  assert(j6snap.missingRequired.some(x => x.includes('同意')), 'J5b 该组进入 missingRequired', JSON.stringify(j6snap.missingRequired))
+  j6.remove()
+
+  // J6: 包裹层内的裸 [role=switch]（无 .ant-switch class）不得被判 unknown 丢弃
+  const j7 = document.createElement('div')
+  j7.innerHTML = '<span>通知設定</span><button type="button" role="switch" aria-checked="false">通知</button>'
+  mainForm.appendChild(j7)
+  const j7snap = buildSnapshot()
+  assert(j7snap.fields.some(f => f.kind === 'switch' && f.value === 'off'), 'J6 包裹层内裸 [role=switch] 被识别为 switch', JSON.stringify(j7snap.fields.filter(f => f.kind === 'switch')))
+  j7.remove()
+
+  // J7: display:none 幽灵 input 不得遮蔽可见 input（快照读值 + fill 落点都要在可见的那个）
+  const j8 = document.createElement('div')
+  j8.className = 'ant-form-item'
+  j8.innerHTML = '<input style="display:none" required><input value="既存値">'
+  mainForm.appendChild(j8)
+  const j8in = j8.querySelectorAll('input')[1]
+  const j8f = buildSnapshot().fields.find(f => f.value === '既存値')
+  assert(!!j8f && j8f.filled === true, 'J7a 快照读到可见 input 的值（不被 display:none 遮蔽）')
+  const j8r = j8f ? await execTool('fill_text', { ref: j8f.ref, value: 'テスト太郎' }) : { ok: false, result: 'no field' }
+  eq(j8in.value, 'テスト太郎', 'J7b fill 落到可见 input')
+  eq(j8.querySelectorAll('input')[0].value, '', 'J7c 隐藏 input 未被写入')
+  j8.remove()
+
+  // J8: readonly 字段 fill_text 明确失败且不改写原值
+  const j9 = document.createElement('div')
+  j9.className = 'ant-form-item'
+  j9.innerHTML = '<div class="ant-form-item-label"><label>ロック</label></div><input readonly value="固定">'
+  mainForm.appendChild(j9)
+  const j9in = j9.querySelector('input')
+  const j9f = buildSnapshot().fields.find(f => f.label === 'ロック')
+  const j9r = j9f ? await execTool('fill_text', { ref: j9f.ref, value: '999' }) : { ok: false, result: 'no field' }
+  assert(j9r.ok === false && /readonly|只读/.test(j9r.result || ''), 'J8 readonly 字段 fill_text 明确失败', JSON.stringify(j9r))
+  eq(j9in.value, '固定', 'J8b readonly 原值未被改写')
+  j9.remove()
+
+  // ===== K. 第二批修复回归（可见性 / readonly 确认页 / actions 截断 / 选项口径）=====
+  out.push('<div class="section">K. 第二批修复回归</div>')
+  const byUnit = (root, pred) => buildSnapshot().fields.find(f => { const r = getRef(f.ref); return pred(f) && r && root.contains(r.item) })
+
+  // K1: visibility:hidden 的错误节点不算校验错误；visible() 本身排除 visibility:hidden
+  const k1style = document.createElement('style')
+  k1style.textContent = '.k1-hidden-vis{visibility:hidden}'
+  document.head.appendChild(k1style)
+  const k1 = document.createElement('div')
+  k1.className = 'ant-form-item'
+  k1.innerHTML = '<div class="ant-form-item-label"><label>隠れエラー</label></div><input><div class="ant-form-item-explain-error k1-hidden-vis">phantom</div>'
+  mainForm.appendChild(k1)
+  const k1f = byUnit(k1, f => f.kind === 'text')
+  assert(!!k1f && !k1f.error, 'K1 visibility:hidden 错误节点不算校验错误', JSON.stringify(k1f))
+  eq(visible(k1.querySelector('.k1-hidden-vis')), false, 'K1b visible() 排除 visibility:hidden')
+  k1.remove()
+
+  // K2: readonly 回显的确认页仍须被识别并硬拦截（iframe fixture：整页只有 readonly + 提交按钮）
+  const k2 = await probe('fixtures-confirm-readonly.html', async w => {
+    w.eval('(async () => { const v = { conf: isConfirm(), blocked: await execTool("click_button", { target: "next" }) }; window.__r = JSON.stringify(v) })()')
+    return JSON.parse(await waitR(w))
+  })
+  eq(k2.conf, true, 'K2 readonly 回显的确认页被识别（不再漏判）')
+  eq(k2.blocked.ok, false, 'K2b readonly 确认页 click_button 被硬拦截')
+
+  // K3: actions 必须先过滤再截断——20 个隐藏按钮不得挤掉真正的「住所自動入力」
+  const k3 = document.createElement('div')
+  k3.innerHTML = Array.from({ length: 20 }, (_, i) => `<button type="button" style="display:none">hidden${i}</button>`).join('')
+    + '<button type="button" id="k3-autofill">住所自動入力</button>'
+  mainForm.appendChild(k3)
+  const k3act = buildSnapshot().actions.find(a => /住所自動入力/.test(a.label))
+  assert(!!k3act, 'K3 actions 先过滤后截断（隐藏按钮不挤掉住所自動入力）', JSON.stringify(buildSnapshot().actions.map(a => a.label)))
+  k3.remove()
+
+  // K4: 原生 select 的 first 跳过 disabled 选项
+  const k4 = document.createElement('div')
+  k4.className = 'ant-form-item'
+  k4.innerHTML = '<div class="ant-form-item-label"><label>区分</label></div><select><option value="" disabled>選択してください</option><option value="a" disabled>区分A</option><option value="b">区分B</option></select>'
+  mainForm.appendChild(k4)
+  const k4f = byUnit(k4, f => f.kind === 'select')
+  const k4r = k4f ? await execTool('choose_option', { ref: k4f.ref, option: 'first' }) : { ok: false, result: 'no field' }
+  assert(k4r.ok === true && /区分B/.test(k4r.result || ''), 'K4 原生 select first 跳过 disabled 选项', JSON.stringify(k4r))
+  k4.remove()
+
+  // K5: 无响应的开关 toggle 必须明确失败（不再假报「已翻转」）
+  const k5 = document.createElement('div')
+  k5.innerHTML = '<button type="button" role="switch" aria-checked="false">無効スイッチ</button>'
+  mainForm.appendChild(k5)
+  const k5f = byUnit(k5, f => f.kind === 'switch')
+  const k5r = k5f ? await execTool('choose_option', { ref: k5f.ref, option: 'toggle' }) : { ok: false, result: 'no field' }
+  assert(k5r.ok === false, 'K5 无响应开关 toggle 明确失败', JSON.stringify(k5r))
+  k5.remove()
+
+  // K6: 无 value 属性的 checkbox 选项文本不应都变成 "on"
+  const k6 = document.createElement('div')
+  k6.className = 'ant-form-item'
+  k6.innerHTML = '<div class="ant-form-item-label"><label>選択</label></div><input type="checkbox"><input type="checkbox" checked>'
+  mainForm.appendChild(k6)
+  const k6f = byUnit(k6, f => f.kind === 'checkbox')
+  assert(!!k6f && (k6f.options || []).every(o => o.label !== 'on'), 'K6 无 value 的 checkbox 选项文本不再都是 "on"', JSON.stringify(k6f && k6f.options))
+  k6.remove()
 
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length

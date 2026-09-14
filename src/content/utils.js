@@ -36,10 +36,12 @@ function setInputValue (el, value) {
 
 // 可见性：offsetParent 对 position:fixed 元素恒为 null（弹窗/悬浮表单会被误判不可见），
 // 改用渲染盒尺寸判断（display:none / 宽高为 0 → 不可见），并优先用原生 checkVisibility。
-// checkOpacity:false：淡入淡出动画中的半透明字段仍算可见（可交互），不因 opacity<1 漏扫
+// checkOpacity:false：淡入淡出动画中的半透明字段仍算可见（可交互），不因 opacity<1 漏扫。
+// checkVisibilityCSS:true：visibility:hidden / collapse 视为不可见——否则隐藏步骤（Bootstrap .invisible、
+// 非活动 tab-pane）里的按钮会被 findNavButton 选中、隐藏的错误节点会被 errorOf 当成校验错误。
 const visible = el => {
   if (!el) return false
-  if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: false })
+  if (typeof el.checkVisibility === 'function') return el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })
   // 兜底：元素有渲染盒且在视口树内
   const rect = el.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0

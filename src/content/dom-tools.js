@@ -100,6 +100,15 @@ function ensureVisible (item) {
   try { item.scrollIntoView({ block: 'nearest', behavior: 'instant' }) } catch (_) { try { item.scrollIntoView() } catch (_) {} }
 }
 
+// 取该字段的文本输入框：优先「可见」的那个。
+// 同一单元里可能同时有 display:none 的（隐藏镜像/模板）和真正可见的输入框，
+// 取第一个会把值写进隐藏节点（快照读空→写入幽灵→下轮报已填的假成功）。
+function textInputOf (item) {
+  if (item.matches?.('input, textarea')) return item
+  const cands = [...(item.querySelectorAll?.('.ant-input-number-input, textarea, input:not([type="hidden"])') || [])]
+  return cands.find(visible) || cands[0] || null
+}
+
 async function fillText (ref, value) {
   const r = getRef(ref)
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
@@ -108,7 +117,9 @@ async function fillText (ref, value) {
   if (['upload', 'date', 'radio', 'checkbox', 'switch', 'cards', 'select'].includes(r.kind)) {
     return { ok: false, result: `字段「${labelOf(r.item) || ref}」类型是 ${r.kind}，请改用对应工具：date→set_date、upload→upload_file、select/radio/checkbox/switch/cards→choose_option（需要按关键词找选项时先 read_options(ref, query)）` }
   }
-  // contenteditable 富文本：直接写 textContent + 派发 input/change
+  // contenteditable 富文本：直接写 textContent + 派发 input/change。
+  // Quill/ProseMirror/tiptap 这类编辑器有自己的内部 model，直接改 DOM 常被下一次重渲染抹掉，
+  // 所以必须回读：写不进去就如实报错，不能回显请求值当成功。
   if (r.kind === 'richtext') {
     const el = r.item.matches?.('[contenteditable]') ? r.item : r.item.querySelector('[contenteditable]')
     if (!el) return { ok: false, result: '该字段不是可编辑富文本' }
@@ -118,10 +129,15 @@ async function fillText (ref, value) {
     el.dispatchEvent(new Event('change', { bubbles: true }))
     el.blur()
     await sleep(50)
-    return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
+    const got = String(el.textContent || '')
+    if (!got.trim()) return { ok: false, result: `富文本「${labelOf(r.item) || ref}」写入后为空（编辑器可能拒绝直接写 DOM），需人工处理` }
+    if (got.trim() !== String(value).trim()) return { ok: true, result: `已填富文本「${labelOf(r.item)}」= ${got}（目标 ${value}，回读不一致，请 get_form 复核）` }
+    return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}` }
   }
-  const input = (r.item.matches?.('input, textarea') && r.item) || r.item.querySelector('.ant-input-number-input, textarea, input:not([type="hidden"])')
+  const input = textInputOf(r.item)
   if (!input) return { ok: false, result: '该字段不是文本框' }
+  // 只读/禁用：写了也不会生效（框架回滚或浏览器忽略），直接如实报错而不是假装填上
+  if (input.readOnly || input.disabled) return { ok: false, result: `字段「${labelOf(r.item) || r.ref}」是${input.readOnly ? '只读(readonly)' : '禁用(disabled)'}状态，无法填写` }
   setNativeValue(input, value)
   await sleep(30)
   // 主动 blur：很多框架在失焦时才触发校验，让错误尽早出现在下一次 get_form 快照里
@@ -137,7 +153,11 @@ async function fillText (ref, value) {
     }
     return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}` }
   }
-  return { ok: true, result: `已填「${labelOf(r.item)}」= ${value}` }
+  // 回读校验：受控/掩码输入可能拒绝或改写写入值，直接回显请求值会造成「已填」假成功
+  const got = String(input.value ?? '')
+  if (!got.trim()) return { ok: false, result: `「${labelOf(r.item)}」写入后为空（控件可能拒绝该值或被框架回滚），请 get_form 复核` }
+  if (got.trim() === String(value).trim()) return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}` }
+  return { ok: true, result: `已填「${labelOf(r.item)}」= ${got}（目标 ${value}，回读不一致，请 get_form 复核）` }
 }
 
 async function chooseOption (ref, option) {
@@ -147,14 +167,16 @@ async function chooseOption (ref, option) {
   // 空 option 在文本匹配 includes('') 恒真下会「静默选第一个」，掩盖参数缺失 → 显式报错让模型改参数
   const want = String(option ?? '').trim()
   if (!want) return { ok: false, result: 'option 不能为空：select/radio 传选项文本或 "first"、checkbox 传 check/uncheck、switch 传 on/off' }
+  // 确认页硬门：与 click/click_button 口径一致，确认页只允许 finish（防在确认页改动数据/误触提交）
+  if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止改动表单（防误提交），请调用 finish 结束。' }
 
   if (r.kind === 'select') {
     // 原生 <select>：直接设值（不走 Ant 互斥锁/浮层逻辑）
     if (!r.item.querySelector('.ant-select')) {
       const sel = r.item.matches('select') ? r.item : r.item.querySelector('select')
       if (!sel) return { ok: false, result: '该字段没有可用 select' }
-      // first/random 跳过空值占位项（選択してください），避免选中占位造成假填充
-      const all = [...sel.options].filter(o => (o.textContent || o.value || '').trim())
+      // first/random 跳过空值占位项（選択してください），也跳过禁用项，避免选中禁用/占位造成假填充
+      const all = [...sel.options].filter(o => !o.disabled && (o.textContent || o.value || '').trim())
       const real = all.filter(o => o.value !== '')
       const opts = (real.length ? real : all).map(o => ({ o, t: (o.textContent || o.value).trim() }))
       if (!opts.length) return { ok: false, result: '该下拉没有可选项' }
@@ -165,6 +187,11 @@ async function chooseOption (ref, option) {
       sel.value = hit.o.value
       sel.dispatchEvent(new Event('input', { bubbles: true }))
       sel.dispatchEvent(new Event('change', { bubbles: true }))
+      // 回读：受控 select（React 等）可能回滚赋值，不校验就会报「已选」而实际未变
+      if (sel.value !== hit.o.value) {
+        const cur = (sel.selectedOptions?.[0]?.textContent || sel.value || '').trim()
+        return { ok: false, result: `选择「${hit.t}」未生效（当前「${cur || '空'}」，可能被框架回滚），请 get_form 复核` }
+      }
       return { ok: true, result: `已选「${labelOf(r.item) || r.ref || ''}」= ${hit.t}` }
     }
     return withSelectLock(async () => {
@@ -228,12 +255,15 @@ async function chooseOption (ref, option) {
         }
         // 回读校验：精确相等直接通过；双向 includes 容错仅在值确实变化后生效
         // （否则旧值「1」是目标「12」的子串，点击没生效也会被判成功）
+        // 键盘兜底只会激活「第一个」选项：此时不再接受「选中项是目标子串」的反向容错
+        // （请求「東京都渋谷区」却选中「東京都」会被误判成功，把错值写进表单）
+        const strict = attempt > 1
         const verified = await waitFor(
           () => selectedTexts().some(t => {
             const nt = norm(t)
             if (!nt) return false
             if (nt === norm(wanted)) return true
-            return nt !== before && (nt.includes(norm(wanted)) || norm(wanted).includes(nt))
+            return nt !== before && (nt.includes(norm(wanted)) || (!strict && norm(wanted).includes(nt)))
           }),
           { timeout: 800, step: 50 })
         if (verified) {
@@ -327,9 +357,12 @@ async function chooseOption (ref, option) {
     const isOn = () => sw.classList.contains('ant-switch-checked') || sw.getAttribute('aria-checked') === 'true'
     const want = String(option ?? '').trim()
     if (/^(toggle|切换)$/i.test(want)) {
+      const beforeOn = isOn()
       sw.click()
-      await sleep(80)
-      return { ok: true, result: `开关已翻转，当前 ${isOn() ? 'on' : 'off'}（请 get_form 复核）` }
+      const flipped = await waitFor(() => isOn() !== beforeOn, { timeout: 500, step: 50 })
+      return flipped
+        ? { ok: true, result: `开关已翻转，当前 ${isOn() ? 'on' : 'off'}` }
+        : { ok: false, result: `开关状态未变化（当前 ${isOn() ? 'on' : 'off'}，可能被禁用），请 get_form 复核` }
     }
     const target = /^(on|开|check|true|1)$/i.test(want) ? true : /^(off|关|uncheck|false|0)$/i.test(want) ? false : null
     if (target === null) return { ok: false, result: `开关请传 on/off/toggle（当前 ${isOn() ? 'on' : 'off'}）` }
@@ -347,6 +380,16 @@ async function chooseOption (ref, option) {
     const activeOf = r.activeOf || (c => c.getAttribute('aria-checked') === 'true' || c.classList.contains('active') || c.classList.contains('selected'))
     const card = cards.find(c => titleOf(c) === want) || cards.find(c => titleOf(c).includes(want))
     if (!card) return { ok: false, result: `未找到卡片「${want}」，可选：${cards.map(titleOf).join(' / ')}` }
+    // 安全红线：卡片常是 <button role="radio">（表单内未显式 type="button" 时默认 type=submit）→ 点击即提交整表。
+    // 与 select/radio/checkbox/switch 各分支同口径：文案命中提交词表、或本身就是表单内提交控件，一律硬拦截。
+    const cardLabel = titleOf(card) || ''
+    const tag = (card.tagName || '').toUpperCase()
+    const ctype = (card.getAttribute('type') || '').toLowerCase()
+    const submitish = (tag === 'INPUT' && (ctype === 'submit' || ctype === 'image')) ||
+      (tag === 'BUTTON' && ctype !== 'button' && !!card.closest('form'))
+    if (isSubmitLabel(cardLabel) || submitish) {
+      return { ok: false, result: `卡片「${cardLabel}」疑似最终提交控件（${tag.toLowerCase()}${ctype ? ` type=${ctype}` : ' 默认 submit'}），已硬拦截（绝不提交）；该字段请留人工处理并在 finish 里说明` }
+    }
     card.click()
     if (!await waitFor(() => activeOf(card), { timeout: 500, step: 50 })) {
       return { ok: false, result: `卡片「${titleOf(card)}」点击后未变选中态，请 get_form 复核` }
@@ -418,10 +461,12 @@ async function uploadFile (ref) {
   // maxCount=1 的替换式列表数量不会增长，所以「按文件名命中」与「数量增长」任一成立即算落列表
   const items = () => [...r.item.querySelectorAll('.ant-upload-list-item')]
   const landed = () => { const it = items(); return it.length > n0 || it.some(x => (x.textContent || '').includes(file.name)) }
-  await waitFor(() => landed() && items().every(x => !x.classList.contains('ant-upload-list-item-uploading')), { timeout: 12000, step: 120 })
+  const done = await waitFor(() => landed() && items().every(x => !x.classList.contains('ant-upload-list-item-uploading')), { timeout: 12000, step: 120 })
   const err = r.item.querySelector('.ant-upload-list-item-error')
   if (err) return { ok: false, result: `上传可能失败（列表项标红）。该字段或只接受特定类型(如 PDF)，需人工。` }
   if (!landed()) return { ok: false, result: '上传后列表未出现文件（可能被组件拒绝），需人工处理。' }
+  // 文件已进列表但 12s 内仍在上传：不算成功——否则模型会据此直接点「次へ」带着未完成的上传前进
+  if (!done) return { ok: false, result: `「${file.name}」已进入上传列表但 12 秒内仍未完成上传（网络慢或服务端处理中）；请稍后 get_form 复核再前进` }
   return { ok: true, result: `已上传「${file.name}」，当前列表 ${items().length} 个文件；稍后可 get_form 复核。` }
 }
 
@@ -431,10 +476,23 @@ async function clickElement (ref) {
   if (!r) return { ok: false, result: `ref ${ref} 不存在或已失效（页面步骤切换后 DOM 会重建），请重新 get_form 拿最新 ref` }
   if (isConfirm()) return { ok: false, result: '已在最终确认页：禁止点击页面元素（防误提交），请调用 finish 结束。' }
   ensureVisible(r.item)
-  const el = r.item.matches('button') ? r.item : (r.item.querySelector('button') || r.item)
-  const label = (r.item.textContent || '').trim()
-  // 安全红线：字段 ref 里也可能藏着提交按钮（Form.Item 包的 htmlType=submit、原生 form 单元）
-  if (isSubmitLabel(el.textContent || el.value)) return { ok: false, result: `「${(el.textContent || el.value || '').trim()}」疑似最终提交按钮，已硬拦截（绝不提交）；填写完成请调用 finish` }
+  const CLICKABLE = 'button, [role="button"], a.ant-btn, a[role="button"], input[type="button"], input[type="submit"]'
+  const labelOfEl = e => (e.textContent || e.value || e.getAttribute?.('aria-label') || '').trim()
+  const inner = [...(r.item.querySelectorAll?.(CLICKABLE) || [])].filter(visible)
+  // 解析真正要点的元素：单元自身可点则点自身，否则点单元内第一个可见可点元素。
+  // 旧实现对非按钮单元会退化成 r.item.click()（空操作）却返回「已点击」——静默假成功。
+  const el = (r.item.matches?.(CLICKABLE) ? r.item : null) || inner[0] || null
+  if (!el) {
+    const t = (r.item.textContent || '').trim()
+    return { ok: false, result: `ref ${ref} 不是可点击元素${t ? `（「${t.slice(0, 40)}」内没有按钮/链接）` : ''}；如需填值请用 fill_text / choose_option` }
+  }
+  // 安全红线：字段单元里可能包着 htmlType=submit 的提交按钮（图标按钮文案为空，须读 aria-label/value），
+  // 单元内任何提交类控件都绝不点击。
+  const riskyEl = [el, ...inner].find(e => isSubmitLabel(labelOfEl(e)))
+  if (riskyEl) {
+    return { ok: false, result: `「${labelOfEl(riskyEl) || ref}」疑似最终提交按钮，已硬拦截（绝不提交）；填写完成请调用 finish` }
+  }
+  const label = labelOfEl(el) || (r.item.textContent || '').trim()
   // 「自动带入地址 / 邮编搜索 / 自动填充」等异步按钮：轮询等表单值变化，有变化立即返回
   // 多语言：住所自動入力 / 自动带入 / 自动填充 / 搜索 / lookup / autofill / geocode 等
   if (/住所|自動入力|自动|邮编|郵便|検索|查询|搜索|地址|lookup|search|autofill|auto.?fill|auto.?complete|fetch|populate|geocode|find/i.test(label)) {

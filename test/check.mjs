@@ -42,4 +42,41 @@ try {
   fail++
   console.log(`FAIL toolPhase: ${e.message}`)
 }
+// finish 混批：splitBatch 必须把 finish 摘出，兄弟调用照常保留（不再短路吞掉同批）
+try {
+  const bg2 = await import(pathToFileURL(resolve('src/background/index.js')))
+  const tc = (name, args) => ({ id: name + '-id', function: { name, arguments: JSON.stringify(args || {}) } })
+  const mixed = bg2.splitBatch([tc('fill_text', { ref: 'e7', value: 'x' }), tc('finish', { summary: 'ok' }), tc('get_form')])
+  if (!mixed.finish || mixed.batch.length !== 2) throw new Error(`splitBatch 未摘出 finish：batch=${mixed.batch.length}`)
+  if (mixed.batch.some(t => t.function.name === 'finish')) throw new Error('splitBatch 的 batch 仍含 finish')
+  if (!mixed.batch.some(t => t.function.name === 'fill_text')) throw new Error('splitBatch 丢了同批的 fill_text')
+  const only = bg2.splitBatch([tc('finish', { summary: 's' })])
+  if (!only.finish || only.batch.length !== 0) throw new Error('splitBatch 纯 finish 批处理错误')
+  const none = bg2.splitBatch([tc('get_form')])
+  if (none.finish !== null || none.batch.length !== 1) throw new Error('splitBatch 无 finish 时行为错误')
+  console.log('OK  splitBatch（finish 混批不吞兄弟调用）')
+} catch (e) {
+  fail++
+  console.log(`FAIL splitBatch: ${e.message}`)
+}
+// llm.js：异常响应必须给出可读报错，而不是把原始 SyntaxError / 空 message 抛给面板
+try {
+  const { callLLM } = await import(pathToFileURL(resolve('src/background/llm.js')))
+  const realFetch = globalThis.fetch
+  const call = () => callLLM({ endpoint: 'http://127.0.0.1:1/v1/chat/completions', model: 'm', messages: [], tools: [] })
+  globalThis.fetch = async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token < in JSON') } })
+  const e1 = await call().then(() => '', e => e.message)
+  if (!/非 JSON/.test(e1)) throw new Error('非 JSON 响应未给出可读错误：' + e1)
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ choices: [{}] }) })
+  const e2 = await call().then(() => '', e => e.message)
+  if (!/message/.test(e2)) throw new Error('choices[0] 缺 message 未报错：' + e2)
+  globalThis.fetch = async () => ({ ok: false, status: 404, text: async () => 'not found' })
+  const e3 = await call().then(() => '', e => e.message)
+  if (!/404/.test(e3)) throw new Error('HTTP 错误未上报状态码：' + e3)
+  globalThis.fetch = realFetch
+  console.log('OK  callLLM 异常响应（非 JSON / 缺 message / HTTP 错误）有可读报错')
+} catch (e) {
+  fail++
+  console.log(`FAIL callLLM 异常响应: ${e.message}`)
+}
 process.exit(fail ? 1 : 0)

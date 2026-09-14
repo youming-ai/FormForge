@@ -77,38 +77,53 @@ export async function callLLM ({ endpoint, model, messages, tools, signal }) {
     else signal.addEventListener('abort', onExternal, { once: true })
   }
   let resp
+  // 整个「请求 + 读 body」都在同一个超时/中止信号下：fetch 只等到响应头就 resolve，
+  // 若在读完 body 前就 clearTimeout/摘掉 abort 钩子，服务端发完头后卡住 body 会永久挂起
+  // （面板停在运行中，且「停止」的 abort 无人监听而失效）。
   try {
-    resp = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages,
-        tools,
-        tool_choice: 'auto',
-        temperature: 0.3,
-        max_tokens: 4096, // 需容下 Qwen3 的 <think> 段：截断（finish_reason=length）会让整轮没有 tool_calls
-        stream: false,
-        cache_prompt: true, // llama.cpp / LM Studio：保留 KV prompt cache，多轮工具循环显著降低首 token 延迟
-      }),
-      signal: ctrl.signal,
-    })
-  } catch (err) {
-    if (timedOut) throw new Error(`推理服务响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：可能正在冷加载模型或队列拥堵，请重试`)
-    if (signal?.aborted) throw new Error('已停止') // 用户主动中止，不是故障
-    throw new Error(`连不上推理服务 (${endpoint})：${err?.message || err}。确认 llama-server/llama-swap 或 LM Studio 已启动并可从本机访问。`)
+    try {
+      resp = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages,
+          tools,
+          tool_choice: 'auto',
+          temperature: 0.3,
+          max_tokens: 4096, // 需容下 Qwen3 的 <think> 段：截断（finish_reason=length）会让整轮没有 tool_calls
+          stream: false,
+          cache_prompt: true, // llama.cpp / LM Studio：保留 KV prompt cache，多轮工具循环显著降低首 token 延迟
+        }),
+        signal: ctrl.signal,
+      })
+    } catch (err) {
+      if (timedOut) throw new Error(`推理服务响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：可能正在冷加载模型或队列拥堵，请重试`)
+      if (signal?.aborted) throw new Error('已停止') // 用户主动中止，不是故障
+      throw new Error(`连不上推理服务 (${endpoint})：${err?.message || err}。确认 llama-server/llama-swap 或 LM Studio 已启动并可从本机访问。`)
+    }
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '')
+      throw new Error(`推理服务 ${resp.status}：${t.slice(0, 400)}`)
+    }
+    let data
+    try {
+      data = await resp.json()
+    } catch (err) {
+      if (timedOut) throw new Error(`推理服务响应超时（>${Math.round(LLM_TIMEOUT_MS / 60000)} 分钟）：已返回响应头但 body 迟迟不结束`)
+      if (signal?.aborted) throw new Error('已停止')
+      // 200 + 非 JSON：多半是代理错误页，或服务端忽略了 stream:false 直接返回 SSE
+      throw new Error(`推理服务返回非 JSON（可能是代理错误页或流式响应）：${String(err?.message || err)}`)
+    }
+    const choice = data?.choices?.[0]
+    if (!choice) throw new Error('推理服务未返回 choices（模型是否已加载？）')
+    // 无 message 的 choice 会让 index.js 把 {} 追加进历史，下一轮请求报 "role required"（错误信息与真因无关）
+    if (!choice.message) throw new Error('推理服务返回的 choices[0] 缺少 message 字段（服务端响应格式异常）')
+    return choice
   } finally {
     clearTimeout(timer)
     signal?.removeEventListener('abort', onExternal)
   }
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => '')
-    throw new Error(`推理服务 ${resp.status}：${t.slice(0, 400)}`)
-  }
-  const data = await resp.json()
-  const choice = data?.choices?.[0]
-  if (!choice) throw new Error('推理服务未返回 choices（模型是否已加载？）')
-  return choice
 }
 
 export function toResultString (res) {
