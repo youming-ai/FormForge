@@ -807,6 +807,68 @@ window.chrome = {
   assert(!!k6f && (k6f.options || []).every(o => o.label !== 'on'), 'K6 无 value 的 checkbox 选项文本不再都是 "on"', JSON.stringify(k6f && k6f.options))
   k6.remove()
 
+  // ===== L. 分段表单回归（必填角标 / 自定义错误文案 / 视觉顺序 / 多 form 作用域）=====
+  out.push('<div class="section">L. 分段表单回归</div>')
+
+  // L1: 红 * / 必須 角标 → required=true（旧实现漏判 → 整段「非必填且空」被跳过）
+  const l1 = document.createElement('div')
+  l1.className = 'ant-form-item'
+  l1.innerHTML = '<label><span class="req-mark">*</span>氏名・姓</label><input>'
+  mainForm.appendChild(l1)
+  const l1f = byUnit(l1, f => f.kind === 'text')
+  assert(!!l1f && l1f.required === true, 'L1 红 * 角标识别为必填', JSON.stringify(l1f))
+  const l1b = document.createElement('div')
+  l1b.className = 'ant-form-item'
+  l1b.innerHTML = '<label>* 氏名・名</label><input>'
+  mainForm.appendChild(l1b)
+  const l1bf = byUnit(l1b, f => f.kind === 'text')
+  assert(!!l1bf && l1bf.required === true, 'L1b label 文本以 * 开头识别为必填', JSON.stringify(l1bf))
+  const l1c = document.createElement('div')
+  l1c.className = 'ant-form-item'
+  l1c.innerHTML = '<label>フリガナ（必須）</label><input>'
+  mainForm.appendChild(l1c)
+  const l1cf = byUnit(l1c, f => f.kind === 'text')
+  assert(!!l1cf && l1cf.required === true, 'L1c 「（必須）」label 识别为必填', JSON.stringify(l1cf))
+  l1.remove(); l1b.remove(); l1c.remove()
+
+  // L2: 自定义类名的校验文案（入力してください）→ error；label 里的「必須」不当错误
+  const l2 = document.createElement('div')
+  l2.className = 'ant-form-item'
+  l2.innerHTML = '<label><span class="req-mark">*</span>電話番号</label><input><div class="input-error">入力してください</div>'
+  mainForm.appendChild(l2)
+  const l2f = byUnit(l2, f => f.kind === 'text')
+  assert(!!l2f && /入力してくださ/.test(l2f.error || ''), 'L2 自定义错误文案被识别', JSON.stringify(l2f))
+  const l2b = document.createElement('div')
+  l2b.className = 'ant-form-item'
+  l2b.innerHTML = '<label>フリガナ（必須）</label><input value="テスト">'
+  mainForm.appendChild(l2b)
+  const l2bf = byUnit(l2b, f => f.kind === 'text')
+  assert(!!l2bf && !l2bf.error, 'L2b label 含「必須」不当错误', JSON.stringify(l2bf))
+  l2.remove(); l2b.remove()
+
+  // L3: 快照按视觉顺序 —— flex order 把 DOM 反序的页面上，不再「从视觉下方开始」
+  const l3 = document.createElement('div')
+  l3.style.display = 'flex'
+  l3.style.flexDirection = 'column'
+  l3.innerHTML = '<div style="order:2"><input placeholder="視覚下"></div><div style="order:1"><input placeholder="視覚上"></div>'
+  mainForm.appendChild(l3)
+  const l3snap = buildSnapshot()
+  const l3top = l3snap.fields.findIndex(f => f.label === '視覚上')
+  const l3bottom = l3snap.fields.findIndex(f => f.label === '視覚下')
+  assert(l3top >= 0 && l3bottom >= 0 && l3top < l3bottom, 'L3 快照按视觉顺序（DOM 反序页不再从下方开始）', JSON.stringify([l3top, l3bottom]))
+  l3.remove()
+
+  // L4: 「代表者/担当者」各一个 form 的分段页面：两段都进快照，且按视觉顺序（代表者在先）
+  const l4 = await probe('fixtures-two-forms.html', async w => {
+    w.eval('(() => { const s = buildSnapshot(); window.__r = JSON.stringify({ labels: s.fields.map(f => f.label), missing: s.missingRequired }) })()')
+    return JSON.parse(await waitR(w))
+  })
+  assert(l4.labels.some(l => /代表者/.test(l)) && l4.labels.some(l => /担当者/.test(l)), 'L4a 两个 form 的字段都进快照（不再丢整段）', JSON.stringify(l4.labels))
+  const l4head = l4.labels.findIndex(l => /代表者/.test(l))
+  const l4tail = l4.labels.findIndex(l => /担当者/.test(l))
+  assert(l4head >= 0 && l4tail >= 0 && l4head < l4tail, 'L4b 视觉在上方的「代表者」排在快照前面', JSON.stringify(l4.labels))
+  assert(l4.missing.length >= 4, 'L4c 两段的必填空字段都进 missingRequired', JSON.stringify(l4.missing))
+
   const total = out.filter(x => x.startsWith('<div class="pass"')).length
   const fails = out.filter(x => x.startsWith('<div class="fail"')).length
   document.getElementById('summary').innerHTML = `<b>结果：PASS ${total} / FAIL ${fails}</b>`

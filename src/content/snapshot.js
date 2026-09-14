@@ -31,15 +31,21 @@ const isSubmitLabel = t => { const n = normLabel(t); return (SUBMIT_WORDS.test(n
 
 // —— 作用域：可见表单中控件最多的 → body ——
 function pickScope () {
+  const forms = [...document.querySelectorAll('form')].filter(visible)
   let best = null
-  for (const f of [...document.querySelectorAll('form')].filter(visible)) {
+  for (const f of forms) {
     const n = f.querySelectorAll('input:not([type="hidden"]), select, textarea').length
     if (n > 0 && (!best || n > best.n)) best = { f, n }
   }
-  // 只有当这个 form 装着页面上过半的控件时才认它：主表单不用 <form>（React/Vue 常见）而页头有个
-  // 搜索/登录 form 时，否则整个扫描会跑偏到搜索框上
+  if (!best) return document.body
+  // 只有当这个 form 装着页面上过半控件、且「没有另一个装着相当多控件的表单」时才认它：
+  // ① 主表单不用 <form>（React/Vue 常见）而页头有个搜索/登录 form 时，认它会跑偏到搜索框上；
+  // ② 「代表者」「担当者」各一个 <form> 的分段表单，认其中一个会把另一整段字段静默丢掉
+  //   （那段字段根本不进快照 → agent 永远不填它）。两种情况都退回 body 全页扫描。
   const all = document.querySelectorAll('input:not([type="hidden"]), select, textarea').length
-  return best && best.n * 2 >= all ? best.f : document.body
+  const rival = forms.some(f => f !== best.f &&
+    f.querySelectorAll('input:not([type="hidden"]), select, textarea').length * 2 >= best.n)
+  return (!rival && best.n >= 2 && best.n * 2 >= all) ? best.f : document.body
 }
 const scopeEl = () => pickScope()
 
@@ -131,6 +137,20 @@ const errorOf = item => {
     .map(el => (el.textContent || '').trim())
     .find(Boolean)
   if (textErr) return textErr
+  // 文案兜底：自研表单的错误节点类名千奇百怪（选择器捞不到）。只在可见性过滤后按
+  // 「短小的校验用语」识别，且排除 label/legend/th —— 否则会把「氏名（必須）」这类标签当错误，
+  // 或复活 Bootstrap .invalid-feedback 常驻 DOM 的老问题（display 切换的节点 visible() 已滤掉）。
+  const ERR_HINT = /(入力してくださ|入力が必要|選択してくださ|必須項目|正しくありません|形式が|invalid|is required|cannot be blank|不能为空|请输入|请选择|格式不)/i
+  const hint = [...(scope?.querySelectorAll('span, p, div, small, em, li') || [])]
+    .filter(el => visible(el) &&
+      !el.querySelector?.('input, select, textarea') &&
+      !el.closest?.('.ant-form-item-label, label, legend, th') &&
+      (el.textContent || '').trim().length > 0 &&
+      (el.textContent || '').trim().length <= 24 &&
+      ERR_HINT.test(el.textContent || ''))
+    .map(el => (el.textContent || '').trim())
+    .find(Boolean)
+  if (hint) return hint
   // aria-invalid 不进通用选择器：挂在容器 div 上会把 label+错误整段文本当错误返回；
   // 只认控件自身被标记的情况——页面没有错误文案节点时给 agent 一个明确信号
   const control = [...(scope?.querySelectorAll('input, select, textarea') || [])]
@@ -138,13 +158,44 @@ const errorOf = item => {
   return control ? '（控件被标记 aria-invalid：校验失败但无可见错误文案，请按字段语义换值重试）' : ''
 }
 
-// 必填：Ant 标记 / 原生 required / aria-required
+// 必填角标兜底：大量自研表单（日文尤其常见）只用「红 * / ※ / 必須」标注必填，
+// 既没有 required 属性、也没有 aria-required/.ant-form-item-required —— 漏判会让整段字段
+// 变成「非必填且为空」被 prompt 的跳过规则整段略过（用户看到的就是「上面的表单永远不填」）。
+// 查找范围：Ant item → 包裹 label → label[for] → 小型父容器；裸控件（父级是 form 等大容器）
+// 只看前一个兄弟节点，避免把整个 form 的标记套到每个字段头上。
+function hasRequiredMark (item) {
+  const roots = []
+  const fi = item.closest?.('.ant-form-item')
+  if (fi) roots.push(fi)
+  const lb = item.closest?.('label')
+  if (lb) roots.push(lb)
+  if (item.id) {
+    const fl = document.querySelector(`label[for="${CSS.escape(item.id)}"]`)
+    if (fl) roots.push(fl)
+  }
+  const p = item.parentElement
+  if (p && !p.matches?.('form, body, main, [role="main"], table, html')) roots.push(p)
+  else if (item.previousElementSibling) roots.push(item.previousElementSibling)
+  const hit = t => !!t && t.length <= 12 && (t === '*' || t === '＊' || t === '※' || /^[*＊※]/.test(t) || /必須|必填/.test(t))
+  for (const root of roots) {
+    const els = [...root.querySelectorAll('span, i, b, em, sup, small, dt, th, legend, p, div, label')].filter(visible)
+    for (const el of els) {
+      if (el.querySelector?.('input, select, textarea')) continue // 装着控件的容器不算标记
+      if (hit((el.textContent || '').trim())) return true
+    }
+    if (hit((root.textContent || '').trim())) return true // 根自身就是短标记（如「* 氏名・姓」）
+  }
+  return false
+}
+
+// 必填：Ant 标记 / 原生 required / aria-required / 必填角标（红 * 与「必須」）
 const isRequired = item =>
   !!(item.querySelector('.ant-form-item-required, [required], [aria-required="true"]') ||
      item.matches?.('[required], [aria-required="true"]') ||
      // 子单元（输入组分段、input-group 容器等）：必填标记挂在外层 .ant-form-item 的 label 上，
      // 不往上找就会漏判成非必填 → 进不了 missingRequired，agent 按「跳过已完成」规则整段略过
-     item.closest?.('.ant-form-item')?.querySelector('.ant-form-item-label .ant-form-item-required'))
+     item.closest?.('.ant-form-item')?.querySelector('.ant-form-item-label .ant-form-item-required') ||
+     hasRequiredMark(item))
 
 // 取控件 placeholder 当标签兜底（无 label 只有 placeholder 的字段，如地址组子字段）
 const placeholderOf = item => {
@@ -450,14 +501,17 @@ function buildSnapshot () {
       actions.push({ ref, label })
     })
 
-  // 按页面视觉顺序（文档序）重排字段，保证模型从上到下逐个处理
-  // ref→item 建表一次：sort 比较触发 O(n log n) 次回调，逐次 REFS.find 是 O(n²) 线性扫描，大表单下省掉重复遍历
-  const itemOf = new Map(REFS.map(r => [r.ref, r.item]))
+  // 按「页面视觉顺序」（先上下、后左右）排序，保证模型从上到下逐个处理。
+  // 不能用 DOM 文档序：CSS 重排（flex order / grid / 绝对定位 / 分段组件挂载顺序）的页面上
+  // 文档序与视觉顺序相反，模型按快照顺序填就会「从页面下方的区块开始」。
+  // 同一行（top 差 4px 内）按左右排，两列表单得到「姓→名→姓カナ→…」的阅读序。
+  const rectOf = new Map(REFS.map(r => [r.ref, r.item.getBoundingClientRect()]))
   fields.sort((a, b) => {
-    const ea = itemOf.get(a.ref)
-    const eb = itemOf.get(b.ref)
-    if (!ea || !eb) return 0
-    return ea.compareDocumentPosition(eb) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+    const ra = rectOf.get(a.ref)
+    const rb = rectOf.get(b.ref)
+    if (!ra || !rb) return 0
+    const dy = ra.top - rb.top
+    return Math.abs(dy) > 4 ? dy : ra.left - rb.left
   })
 
   const missingRequired = fields

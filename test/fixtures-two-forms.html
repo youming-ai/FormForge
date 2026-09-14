@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head><meta charset="UTF-8"><title>fixtures: 分段表单（代表者/担当者）</title>
+<style>
+  /* 真实页面常见：DOM 里「担当者」在前、CSS 把「代表者」排在视觉上方（flex order 反序） */
+  body { display: flex; flex-direction: column; }
+  #f-tail { order: 2; }
+  #f-head { order: 1; }
+</style></head>
+<body>
+<!-- 每个 section 一个 <form>：旧 pickScope 只认控件最多的一个，另一段字段整体消失 -->
+<form id="f-tail">
+  <h2>担当者</h2>
+  <label><span class="req-mark">*</span>氏名・姓</label>
+  <input placeholder="担当者氏名・姓">
+  <label><span class="req-mark">*</span>生年月日</label>
+  <input placeholder="例) 1980/01/01">
+  <div class="input-error">入力してください</div>
+</form>
+<form id="f-head">
+  <h2>代表者</h2>
+  <label><span class="req-mark">*</span>氏名・姓</label>
+  <input placeholder="代表者氏名・姓">
+  <label><span class="req-mark">*</span>生年月日</label>
+  <input placeholder="例) 1980/01/01">
+  <div class="input-error">入力してください</div>
+</form>
+<script>window.chrome = { storage: { local: { get: async () => ({ agentSettings: null }), set: async () => {} } }, runtime: { onMessage: { addListener: () => {} }, sendMessage: async () => ({}) } }</script>
+<script src="../src/content/utils.js"></script>
+<script src="../src/content/snapshot.js"></script>
+<script src="../src/content/dom-tools.js"></script>
+</body>
+</html>
